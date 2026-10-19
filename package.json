@@ -1,0 +1,38 @@
+{
+  "name": "flowify-service",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Flowify service: connects ElevenLabs (voice), Jobber (job management) and TNZ (NZ SMS) for all Flowify clients.",
+  "type": "module",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "dev": "node --watch src/server.ts",
+    "dev:worker": "node --watch src/worker.ts",
+    "start:web": "node dist/server.js",
+    "start:worker": "node dist/worker.js",
+    "cron:reminders": "node dist/cron/reminders.js",
+    "migrate": "node dist/migrate.js",
+    "migrate:dev": "node src/migrate.ts",
+    "connect-link": "node src/scripts/connectLink.ts",
+    "jobber:clients": "node src/scripts/jobberClients.ts",
+    "sql": "node src/scripts/sql.ts",
+    "sms:test": "node src/scripts/sendTestSms.ts",
+    "test": "node --test test/*.test.ts"
+  },
+  "dependencies": {
+    "@sentry/node": "^9.0.0",
+    "fastify": "^5.2.0",
+    "libphonenumber-js": "^1.11.0",
+    "pg": "^8.13.0",
+    "pg-boss": "^10.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/pg": "^8.11.0",
+    "typescript": "^5.8.0"
+  }
+}

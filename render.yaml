@@ -1,0 +1,81 @@
+# Render Blueprint for the Flowify service.
+# Everything runs in Oregon (US West), next to ElevenLabs and Jobber.
+# Nothing is on the free tier: free web services sleep, which means dead air mid-call.
+#
+# Secrets are NOT in this file. Render ignores `sync: false` inside an environment group,
+# so the group below only declares non-secret defaults. After the first Blueprint sync,
+# add the secrets to the `flowify-shared` group in the Render dashboard (Environment
+# Groups). Render keeps dashboard-added variables on later syncs. See SETUP.md.
+# Keep a copy of every secret in 1Password, especially TOKEN_ENCRYPTION_KEY. If you lose
+# it, every client has to reconnect Jobber.
+#
+# Plan IDs use Render's current names: 0.5c-512mb is the old "Starter" size.
+
+envVarGroups:
+  - name: flowify-shared
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: JOBBER_API_VERSION       # X-JOBBER-GRAPHQL-VERSION. Bump deliberately after reading Jobber's changelog.
+        value: "2025-04-16"
+      # Added in the dashboard (secrets): PUBLIC_BASE_URL, APP_SECRET, TOKEN_ENCRYPTION_KEY,
+      # JOBBER_CLIENT_ID, JOBBER_CLIENT_SECRET, ELEVENLABS_TOOL_SECRET,
+      # ELEVENLABS_WEBHOOK_SECRET, TNZ_API_TOKEN, TNZ_INBOUND_KEY, SENTRY_DSN
+
+services:
+  # 1. Web service: ElevenLabs tool calls, Jobber webhooks, Jobber OAuth connect flow.
+  - type: web
+    name: flowify-web
+    runtime: node
+    region: oregon
+    plan: 0.5c-512mb
+    buildCommand: npm ci && npm run build
+    preDeployCommand: npm run migrate      # runs DB migrations before each deploy goes live
+    startCommand: npm run start:web
+    healthCheckPath: /healthz
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: flowify-db
+          property: connectionString
+      - fromGroup: flowify-shared
+
+  # 2. Background worker: TNZ texts, emails, Jobber lookups after events, retries.
+  - type: worker
+    name: flowify-worker
+    runtime: node
+    region: oregon
+    plan: 0.5c-512mb
+    buildCommand: npm ci && npm run build
+    startCommand: npm run start:worker
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: flowify-db
+          property: connectionString
+      - fromGroup: flowify-shared
+
+  # 3. Nightly day-before reminders. Render cron schedules are UTC.
+  #    05:00 UTC = 6pm NZDT (summer) / 5pm NZST (winter) — inside sending hours either way.
+  #    The cron only enqueues a job; the worker does the Jobber queries and texts.
+  - type: cron
+    name: flowify-reminders
+    runtime: node
+    region: oregon
+    plan: 0.5c-512mb
+    schedule: "0 5 * * *"
+    buildCommand: npm ci && npm run build
+    startCommand: npm run cron:reminders
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: flowify-db
+          property: connectionString
+      - fromGroup: flowify-shared
+
+databases:
+  - name: flowify-db
+    region: oregon
+    plan: 0.1c-256mb         # smallest paid size: no expiry, daily backups
+    postgresMajorVersion: "17"
+    ipAllowList: []          # internal connections only
