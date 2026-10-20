@@ -173,11 +173,16 @@ describe('misc', () => {
     assert.equal(messageRowIdFromTnz(undefined), null);
   });
 
-  it('parses likely TNZ reply webhook shapes', () => {
-    assert.deepEqual(extractInbound({ From: '+64211234567', MessageText: 'STOP', MessageID: 'flowify7a1', SubAccount: 'smith' }), {
-      from: '+64211234567', text: 'STOP', messageId: 'flowify7a1', subAccount: 'smith',
+  it('parses the real TNZ webhook field set', () => {
+    const f = extractInbound({
+      Version: 'v3.00', Sender: 'jaron@flowify.nz', APIKey: 'x', Type: 'SMSReply', Destination: '+64211234567',
+      ReceivedID: 'r1', MessageID: 'flowify7a1', SubAccount: 'smith', Status: 'RECEIVED', Result: 'Success', Message: 'Stop', Detail: '',
     });
-    assert.equal(extractInbound({ sender: '0211234567', message: 'Stop' }).text, 'Stop');
-    assert.equal(extractInbound({ Status: 'Delivered', MessageID: 'flowify7a1' }).text, undefined); // delivery result
+    assert.deepEqual(f.phoneCandidates, ['jaron@flowify.nz', '+64211234567']);
+    assert.deepEqual(f.textCandidates, ['Stop']);
+    assert.equal(f.messageId, 'flowify7a1');
+    assert.equal(f.type, 'SMSReply');
+    assert.equal(f.receivedId, 'r1');
+    assert.equal(extractInbound({ Status: 'Delivered', MessageID: 'flowify7a1' }).textCandidates.length, 0);
   });
 });

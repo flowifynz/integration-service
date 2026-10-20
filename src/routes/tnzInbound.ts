@@ -2,11 +2,7 @@
 // as its WebhookCallbackURL (JSON), so TNZ posts here for:
 //   - replies from customers (we act on STOP)
 //   - delivery results for our texts (logged for now)
-//
-// ⚠ TNZ's spec links to the webhook payloads but doesn't define them, so extractInbound()
-// (sms/inbound.ts) accepts the likely field names (from TNZ's polling endpoints: From, MessageText,
-// MessageID, SubAccount). Each request logs its field NAMES (never values) so the first
-// real reply confirms the shape. Then trim extractInbound to the real names.
+// Both arrive with the same field set; see sms/inbound.ts.
 //
 // Attribution: TNZ puts our outbound MessageID on replies it can match, which gives us the
 // messages row and so the client. Fallback: the SubAccount. If neither works, the number
@@ -16,7 +12,7 @@ import type { FastifyInstance } from 'fastify';
 import { config } from '../config.ts';
 import { safeEqual } from '../crypto.ts';
 import { db } from '../db.ts';
-import { toE164 } from '../phone.ts';
+import { isMobile, toE164 } from '../phone.ts';
 import { isStopRequest } from '../sms/compose.ts';
 import { extractInbound } from '../sms/inbound.ts';
 import { messageRowIdFromTnz } from '../sms/tnz.ts';
@@ -27,24 +23,39 @@ export async function tnzInboundRoutes(app: FastifyInstance) {
     if (!safeEqual(key, config.tnz.inboundKey)) return reply.code(401).send();
 
     const body = (req.body && typeof req.body === 'object' ? req.body : {}) as Record<string, unknown>;
-    const fields = extractInbound(body);
-    // Field names only — message text and numbers stay out of the logs.
-    req.log.info({ tnzFields: Object.keys(body), hasText: Boolean(fields.text) }, 'TNZ webhook');
+    const f = extractInbound(body);
 
-    // No reply text → a delivery result. Logged above; nothing else to do yet.
-    if (!fields.text) return reply.code(200).send();
+    // First candidate that is a valid NZ mobile; first text that is a STOP request.
+    const phone = f.phoneCandidates.map((p) => toE164(p)).find((p): p is string => Boolean(p && isMobile(p))) ?? null;
+    const isStop = f.textCandidates.some((t) => isStopRequest(t));
+    const rowId = messageRowIdFromTnz(f.messageId);
 
-    const phone = toE164(fields.from);
-    if (!phone || !isStopRequest(fields.text)) return reply.code(200).send();
+    // Shape only — no numbers, no message text, no API key.
+    req.log.info(
+      {
+        tnz: {
+          type: f.type,
+          status: f.status,
+          result: f.result,
+          hasReceivedId: Boolean(f.receivedId),
+          phoneFound: Boolean(phone),
+          isStop,
+          ourMessageId: Boolean(rowId),
+          hasSubAccount: Boolean(f.subAccount),
+        },
+      },
+      'TNZ webhook',
+    );
+
+    if (!phone || !isStop) return reply.code(200).send();
 
     let clientId: string | null = null;
-    const rowId = messageRowIdFromTnz(fields.messageId);
     if (rowId) {
       const { rows } = await db().query<{ client_id: string }>('SELECT client_id FROM messages WHERE id = $1', [rowId]);
       clientId = rows[0]?.client_id ?? null;
     }
-    if (!clientId && fields.subAccount) {
-      const { rows } = await db().query<{ id: string }>('SELECT id FROM clients WHERE tnz_subaccount = $1', [fields.subAccount]);
+    if (!clientId && f.subAccount) {
+      const { rows } = await db().query<{ id: string }>('SELECT id FROM clients WHERE tnz_subaccount = $1', [f.subAccount]);
       if (rows.length === 1) clientId = rows[0]!.id;
     }
 

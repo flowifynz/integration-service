@@ -22,7 +22,8 @@ const app = Fastify({
 
 Sentry.setupFastifyErrorHandler(app);
 
-app.get('/healthz', async () => {
+// Render calls this every few seconds; keep it out of the logs.
+app.get('/healthz', { logLevel: 'silent' }, async () => {
   await db().query('SELECT 1');
   return { ok: true };
 });
