@@ -74,18 +74,19 @@ export function buildTnzPayload(input: TnzSendInput, webhookUrl: string): Record
 }
 
 export async function sendTnzSms(input: TnzSendInput): Promise<{ messageId: string }> {
+  // Read config BEFORE the network try/catch: a missing setting is a config error,
+  // not a retryable network error.
+  const url = `${config.tnz.baseUrl}/sms`;
+  const headers = {
+    Authorization: `Bearer ${config.tnz.apiToken}`,
+    'Content-Type': 'application/json',
+    Accept: 'application/json',
+  };
+  const body = JSON.stringify(buildTnzPayload(input, inboundWebhookUrl()));
+
   let res: Response;
   try {
-    res = await fetch(`${config.tnz.baseUrl}/sms`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${config.tnz.apiToken}`,
-        'Content-Type': 'application/json',
-        Accept: 'application/json',
-      },
-      body: JSON.stringify(buildTnzPayload(input, inboundWebhookUrl())),
-      signal: AbortSignal.timeout(10_000),
-    });
+    res = await fetch(url, { method: 'POST', headers, body, signal: AbortSignal.timeout(10_000) });
   } catch (err) {
     throw new TnzError(0, `Network error: ${(err as Error).message}`); // retryable
   }
