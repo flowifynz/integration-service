@@ -1,8 +1,16 @@
 // TNZ SMS sender — the only module that talks to TNZ.
 //
-// ⚠ The request/response field names below are my best reading of TNZ's API and are NOT
-// confirmed for v3.00. Before the first real send, check them against TNZ's v3.00 docs
-// and adjust buildTnzPayload / parseTnzResponse only — nothing else depends on the shape.
+// Checked against TNZ REST API v3.00 (OpenAPI spec, Oct 2026):
+//  - POST https://api.tnz.co.nz/api/v3.00/sms, `Authorization: Bearer <token>`, JSON body.
+//  - Fields are top-level (no wrapper object): Message, Destination, MessageID, Reference,
+//    SubAccount, Mode ('Test' = handled as successful without sending), NotificationType,
+//    WebhookCallbackURL, WebhookCallbackFormat.
+//  - 200 OK → { "MessageID": "..." }. Errors → { "Result": "Failed", "ErrorMessage": [...] }.
+//  - MessageID is ours to set (max 40 chars, alphanumeric). TNZ puts it on any reply it can
+//    match to this text, which is how a STOP is tied back to the right client.
+//
+// Each text asks TNZ to send replies (and delivery results) to our /tnz/inbound webhook as
+// JSON, so no account-level webhook setting is needed.
 
 import { config } from '../config.ts';
 
@@ -12,7 +20,9 @@ export interface TnzSendInput {
   message: string;
   /** Per-client billing sub-account. */
   subAccount: string | null;
-  /** Our reference — set to the messages.id so replies/receipts can be traced back. */
+  /** Our MessageID: alphanumeric, ≤ 40 chars. See tnzMessageId(). */
+  messageId: string;
+  /** Human-readable reference shown in TNZ's dashboard, e.g. the client slug + message kind. */
   reference: string;
   /** 'Test' = TNZ accepts but doesn't deliver (use during onboarding). */
   mode: 'Test' | 'Live';
@@ -32,22 +42,35 @@ export class TnzError extends Error {
   }
 }
 
-export function buildTnzPayload(input: TnzSendInput): Record<string, unknown> {
-  return {
-    MessageData: {
-      Message: input.message,
-      Destinations: [{ Recipient: input.to }],
-      Reference: input.reference,
-      ...(input.subAccount ? { SubAccount: input.subAccount } : {}),
-      ...(input.mode === 'Test' ? { Mode: 'Test' } : {}),
-    },
-  };
+/**
+ * Our MessageID for a messages row: 'flowify<row id>a<attempt>'. Alphanumeric only, as TNZ
+ * requires. The attempt number keeps each retry unique in case TNZ rejects a reused ID.
+ */
+export function tnzMessageId(messageRowId: string | number, attempt: number): string {
+  return `flowify${messageRowId}a${attempt}`;
 }
 
-function parseTnzResponse(json: Record<string, unknown>): string | null {
-  // Expected: { Result: 'Success', MessageID: '...' } — confirm.
-  if (json.Result !== 'Success') return null;
-  return typeof json.MessageID === 'string' ? json.MessageID : null;
+/** Reverse of tnzMessageId: the messages row id, or null if it isn't one of ours. */
+export function messageRowIdFromTnz(messageId: string | null | undefined): string | null {
+  return messageId?.match(/^flowify(\d+)a\d+$/)?.[1] ?? null;
+}
+
+export function inboundWebhookUrl(): string {
+  return `${config.publicBaseUrl}/tnz/inbound?key=${encodeURIComponent(config.tnz.inboundKey)}`;
+}
+
+export function buildTnzPayload(input: TnzSendInput, webhookUrl: string): Record<string, unknown> {
+  return {
+    Message: input.message,
+    Destination: input.to,
+    MessageID: input.messageId,
+    Reference: input.reference,
+    NotificationType: 'Webhook',
+    WebhookCallbackURL: webhookUrl,
+    WebhookCallbackFormat: 'JSON',
+    ...(input.subAccount ? { SubAccount: input.subAccount } : {}),
+    ...(input.mode === 'Test' ? { Mode: 'Test' } : {}),
+  };
 }
 
 export async function sendTnzSms(input: TnzSendInput): Promise<{ messageId: string }> {
@@ -57,10 +80,10 @@ export async function sendTnzSms(input: TnzSendInput): Promise<{ messageId: stri
       method: 'POST',
       headers: {
         Authorization: `Bearer ${config.tnz.apiToken}`,
-        'Content-Type': 'application/json; encoding=utf-8',
+        'Content-Type': 'application/json',
         Accept: 'application/json',
       },
-      body: JSON.stringify(buildTnzPayload(input)),
+      body: JSON.stringify(buildTnzPayload(input, inboundWebhookUrl())),
       signal: AbortSignal.timeout(10_000),
     });
   } catch (err) {
@@ -69,13 +92,12 @@ export async function sendTnzSms(input: TnzSendInput): Promise<{ messageId: stri
 
   const text = await res.text();
   if (!res.ok) throw new TnzError(res.status, text);
-  let json: Record<string, unknown>;
+  let json: { MessageID?: unknown; Result?: unknown };
   try {
     json = JSON.parse(text);
   } catch {
     throw new TnzError(res.status, `Non-JSON response: ${text}`);
   }
-  const messageId = parseTnzResponse(json);
-  if (!messageId) throw new TnzError(res.status, text);
-  return { messageId };
+  if (json.Result === 'Failed' || typeof json.MessageID !== 'string') throw new TnzError(res.status, text);
+  return { messageId: json.MessageID };
 }

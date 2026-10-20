@@ -9,7 +9,8 @@ import { accessTokenExpiry } from '../src/jobber/oauth.ts';
 import { parseJobberWebhook, verifyJobberSignature, webhookDedupeKey } from '../src/jobber/webhook.ts';
 import { composeSms, isStopRequest } from '../src/sms/compose.ts';
 import { quietHoursDeferral } from '../src/sms/quietHours.ts';
-import { buildTnzPayload } from '../src/sms/tnz.ts';
+import { extractInbound } from '../src/sms/inbound.ts';
+import { buildTnzPayload, messageRowIdFromTnz, tnzMessageId } from '../src/sms/tnz.ts';
 
 describe('token encryption', () => {
   const key = randomBytes(32);
@@ -147,12 +148,36 @@ describe('misc', () => {
     assert.equal(accessTokenExpiry('opaque', 3600, 0).getTime(), 3_600_000);
   });
 
-  it('builds a TNZ payload with Test mode and sub-account', () => {
-    const p = buildTnzPayload({ to: '+64211234567', message: 'hi', subAccount: 'smith', reference: 'msg-1', mode: 'Test' }) as {
-      MessageData: Record<string, unknown>;
-    };
-    assert.equal(p.MessageData.Mode, 'Test');
-    assert.equal(p.MessageData.SubAccount, 'smith');
-    assert.equal(buildTnzPayload({ to: '+64', message: '', subAccount: null, reference: 'r', mode: 'Live' }).MessageData !== undefined, true);
+  it('builds a TNZ v3.00 payload (top-level fields, Test mode, sub-account, our MessageID)', () => {
+    const p = buildTnzPayload(
+      { to: '+64211234567', message: 'hi', subAccount: 'smith', messageId: tnzMessageId(42, 1), reference: 'smith booking_confirmation', mode: 'Test' },
+      'https://x.test/tnz/inbound?key=k',
+    );
+    assert.equal(p.Destination, '+64211234567');
+    assert.equal(p.Message, 'hi');
+    assert.equal(p.MessageID, 'flowify42a1');
+    assert.equal(p.Mode, 'Test');
+    assert.equal(p.SubAccount, 'smith');
+    assert.equal(p.NotificationType, 'Webhook');
+    assert.equal(p.WebhookCallbackFormat, 'JSON');
+    const live = buildTnzPayload({ to: '+64', message: '', subAccount: null, messageId: 'flowify1a1', reference: 'r', mode: 'Live' }, 'u');
+    assert.equal('Mode' in live, false);
+    assert.equal('SubAccount' in live, false);
+  });
+
+  it('TNZ MessageIDs are alphanumeric, <= 40 chars, and map back to the row', () => {
+    const id = tnzMessageId('9007199254740991', 12);
+    assert.match(id, /^[A-Za-z0-9]{1,40}$/);
+    assert.equal(messageRowIdFromTnz(id), '9007199254740991');
+    assert.equal(messageRowIdFromTnz('1000000a-f002-4007-b00a-d00000000002'), null);
+    assert.equal(messageRowIdFromTnz(undefined), null);
+  });
+
+  it('parses likely TNZ reply webhook shapes', () => {
+    assert.deepEqual(extractInbound({ From: '+64211234567', MessageText: 'STOP', MessageID: 'flowify7a1', SubAccount: 'smith' }), {
+      from: '+64211234567', text: 'STOP', messageId: 'flowify7a1', subAccount: 'smith',
+    });
+    assert.equal(extractInbound({ sender: '0211234567', message: 'Stop' }).text, 'Stop');
+    assert.equal(extractInbound({ Status: 'Delivered', MessageID: 'flowify7a1' }).text, undefined); // delivery result
   });
 });

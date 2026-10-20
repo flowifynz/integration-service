@@ -180,40 +180,39 @@ Expect an `APP_DISCONNECT` row marked `processed` and the connection marked
 
 ✅ **Build step 1 is done** when 8.5 lists the clients and 8.6 shows a refresh.
 
-## 9. TNZ: confirm the API format and send a test text
+## 9. TNZ: test texts and STOP
 
-The TNZ code follows my best reading of their API, **not their v3.00 spec**, which isn't
-public. So:
+The sending code matches TNZ's v3.00 API spec. Each text tells TNZ to send replies and
+delivery results to `/tnz/inbound` as JSON, so **there's no webhook to set up in TNZ**.
+The one unconfirmed part is the reply webhook's field names, which TNZ's spec doesn't
+define. Step 9.6 checks them.
 
-1. In your TNZ account, create an **API token** (or ask TNZ support for a v3.00 token) →
-   1Password → `TNZ_API_TOKEN` in the env group → redeploy.
-2. Ask TNZ support for (or find in their docs) the **v3.00 JSON spec** for:
-   - the send-SMS request body (`MessageData`, `Destinations[].Recipient`, `Reference`, `SubAccount`, `Mode`?)
-   - the success response (`Result`, `MessageID`?)
-   - the **inbound reply webhook** payload, and whether it includes the `Reference` of the
-     text being replied to (this decides whether a STOP opts out of one client or all of them)
-   - how SubAccounts are created for per-client billing
-3. Fix `buildTnzPayload` / `parseTnzResponse` in `src/sms/tnz.ts` and `extractInbound` in
-   `src/routes/tnzInbound.ts` to match. Nothing else needs to change.
-4. **Test send** (between 8am and 8pm NZ time; quiet hours apply). **Render Shell:**
+1. TNZ dashboard → create an **API token** → 1Password → `TNZ_API_TOKEN` in the env group → redeploy.
+2. Ask TNZ how **SubAccounts** are created (one per client, for billing). Not needed for this test.
+3. **Test mode send** (between 8am and 8pm NZ time; quiet hours apply). **Render Shell:**
    ```bash
    node dist/scripts/sendTestSms.js flowify-test 021XXXXXXX
    ```
-   In `test` mode TNZ should accept it without delivering it. You'll see
-   `{ status: 'sent', tnzMessageId: ... }`. If it fails, the error includes TNZ's
-   full response.
-5. To get it on your phone, switch the test client to live and send again:
+   Expect `{ status: 'sent', tnzMessageId: 'flowify1a1' }`. TNZ treats it as sent without
+   delivering it. If it fails, the error includes TNZ's response.
+4. **Live send** (needs the paid TNZ account):
    ```bash
    node dist/scripts/sql.js "UPDATE clients SET sms_mode = 'live' WHERE slug = 'flowify-test'"
    node dist/scripts/sendTestSms.js flowify-test 021XXXXXXX
    ```
-   Check the text is signed "- Flowify Test Plumbing".
-6. In TNZ, set the inbound/reply webhook URL to
-   `<PUBLIC_BASE_URL>/tnz/inbound?key=<TNZ_INBOUND_KEY>`. Reply **STOP** to the test text, then:
+   Check it arrives, signed "- Flowify Test Plumbing".
+5. **Reply STOP** to that text from your phone.
+6. Check it was recorded against the right client:
    ```bash
-   node dist/scripts/sql.js "SELECT * FROM opt_outs"
+   node dist/scripts/sql.js "SELECT o.phone, c.slug, o.created_at FROM opt_outs o LEFT JOIN clients c ON c.id = o.client_id"
    ```
-   Delete that row afterwards so you can keep testing:
+   - `slug` = `flowify-test`: TNZ matched the reply to our MessageID. ✅
+   - `slug` empty: the opt-out was applied to **all** clients, because the reply couldn't be
+     matched. In flowify-web → **Logs**, find the line `TNZ webhook` and send Claude its
+     `tnzFields` list (field names only, no numbers or text) so the parser can be adjusted.
+   - No row at all: check the same log line. If there's no `TNZ webhook` line, TNZ didn't
+     call back; ask TNZ whether reply webhooks need enabling on the account.
+7. Clear it so you can keep testing:
    `node dist/scripts/sql.js "DELETE FROM opt_outs"`
 
 ## 10. Sentry (optional now, needed before the first real client)

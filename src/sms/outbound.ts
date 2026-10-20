@@ -8,7 +8,7 @@ import { db, getClientById } from '../db.ts';
 import { formatNational, toE164 } from '../phone.ts';
 import { composeSms, MARKETING_KINDS, type SmsKind } from './compose.ts';
 import { quietHoursDeferral } from './quietHours.ts';
-import { sendTnzSms, TnzError } from './tnz.ts';
+import { sendTnzSms, TnzError, tnzMessageId } from './tnz.ts';
 
 export interface SendSmsJob {
   clientId: string;
@@ -84,12 +84,13 @@ export async function sendClientSms(job: SendSmsJob): Promise<SendSmsResult> {
   }
 
   // 5. Claim the row so a concurrent retry of the same job can't double-send.
-  const claimed = await db().query(
+  const claimed = await db().query<{ attempts: number }>(
     `UPDATE messages SET status = 'sending', attempts = attempts + 1
-      WHERE id = $1 AND status IN ('queued', 'failed') RETURNING id`,
+      WHERE id = $1 AND status IN ('queued', 'failed') RETURNING attempts`,
     [row.id],
   );
-  if (!claimed.rowCount) return { status: 'duplicate' };
+  const attempt = claimed.rows[0]?.attempts;
+  if (!attempt) return { status: 'duplicate' };
 
   // 6. Send.
   try {
@@ -97,7 +98,8 @@ export async function sendClientSms(job: SendSmsJob): Promise<SendSmsResult> {
       to,
       message: body,
       subAccount: client.tnz_subaccount,
-      reference: `msg-${row.id}`,
+      messageId: tnzMessageId(row.id, attempt),
+      reference: `${client.slug} ${job.kind}`,
       mode: client.sms_mode === 'live' ? 'Live' : 'Test',
     });
     await db().query(

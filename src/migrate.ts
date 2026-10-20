@@ -6,13 +6,31 @@
 
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
+import type pg from 'pg';
 import { closeDb, db } from './db.ts';
 
 const MIGRATIONS_DIR = path.resolve(process.cwd(), 'migrations');
 const LOCK_ID = 727274; // arbitrary; stops two deploys migrating at once
 
+// On a first Blueprint deploy (or during Render database maintenance) Postgres can still
+// be starting when this runs. Wait for it instead of failing the deploy: up to ~3 minutes.
+const CONNECT_ATTEMPTS = 18;
+const CONNECT_DELAY_MS = 10_000;
+
+async function connectWithRetry(): Promise<pg.PoolClient> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await db().connect();
+    } catch (err) {
+      if (attempt >= CONNECT_ATTEMPTS) throw err;
+      console.log(`Database not reachable yet (${(err as Error).message}); retry ${attempt}/${CONNECT_ATTEMPTS - 1} in 10s`);
+      await new Promise((resolve) => setTimeout(resolve, CONNECT_DELAY_MS));
+    }
+  }
+}
+
 async function migrate(): Promise<void> {
-  const client = await db().connect();
+  const client = await connectWithRetry();
   try {
     await client.query('SELECT pg_advisory_lock($1)', [LOCK_ID]);
     await client.query(`CREATE TABLE IF NOT EXISTS schema_migrations (

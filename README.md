@@ -125,9 +125,8 @@ Marked in code with comments. None of these are verified yet:
 
 - **Jobber:** the `clients` query fields (`phones`, `emails`, `searchTerm`); webhook topic names; throttling error code;
   booking and reschedule mutations (week-1 list).
-- **TNZ v3.00:** send payload field names (`MessageData`, `Message`, `Destinations`, `Mode`),
-  success response (`Result`, `MessageID`), and the inbound reply payload, including whether
-  it carries our original `Reference`. If it doesn't, every STOP becomes a global opt-out.
+- **TNZ v3.00:** sending matches the spec. The reply/delivery webhook payload field names
+  are not defined in TNZ's spec; `sms/inbound.ts` accepts likely names. Confirm with a real STOP.
 - **ElevenLabs:** post-call signature header format; call-start response shape.
 - **Render:** cron schedule assumed to be UTC.
 
