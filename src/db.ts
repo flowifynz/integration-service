@@ -59,6 +59,7 @@ export interface ClientRow {
   tnz_subaccount: string | null;
   sms_mode: 'test' | 'live';
   monthly_minutes_cap: number | null;
+  elevenlabs_agent_id: string | null;
 }
 
 export async function getClientById(id: string): Promise<ClientRow | null> {

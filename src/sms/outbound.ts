@@ -97,7 +97,7 @@ export async function sendClientSms(job: SendSmsJob): Promise<SendSmsResult> {
     const { messageId } = await sendTnzSms({
       to,
       message: body,
-      subAccount: client.tnz_subaccount,
+      subAccount: client.tnz_subaccount ?? client.slug, // never send untagged
       messageId: tnzMessageId(row.id, attempt),
       reference: `${client.slug} ${job.kind}`,
       mode: client.sms_mode === 'live' ? 'Live' : 'Test',

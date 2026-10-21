@@ -5,6 +5,7 @@ import { createHmac, randomBytes } from 'node:crypto';
 import { describe, it } from 'node:test';
 import { decrypt, encrypt, safeEqual, signToken, verifyToken } from '../src/crypto.ts';
 import { verifyElevenLabsSignature } from '../src/elevenlabsSignature.ts';
+import { addressMatches, normaliseUrgency, ownerAlertText, requestNote, requestTitle, splitName } from '../src/jobber/callerText.ts';
 import { accessTokenExpiry } from '../src/jobber/oauth.ts';
 import { parseJobberWebhook, verifyJobberSignature, webhookDedupeKey } from '../src/jobber/webhook.ts';
 import { composeSms, isStopRequest } from '../src/sms/compose.ts';
@@ -184,5 +185,42 @@ describe('misc', () => {
     assert.equal(f.type, 'SMSReply');
     assert.equal(f.receivedId, 'r1');
     assert.equal(extractInbound({ Status: 'Delivered', MessageID: 'flowify7a1' }).textCandidates.length, 0);
+  });
+});
+
+describe('caller text helpers (create_request)', () => {
+  it('splits names, with placeholders Jobber accepts', () => {
+    assert.deepEqual(splitName('Sam Smith'), { firstName: 'Sam', lastName: 'Smith' });
+    assert.deepEqual(splitName('  Mary Ann  van der Berg '), { firstName: 'Mary', lastName: 'Ann van der Berg' });
+    assert.deepEqual(splitName('Cher'), { firstName: 'Cher', lastName: '(surname not given)' });
+    assert.deepEqual(splitName(''), { firstName: 'Unknown', lastName: 'Caller' });
+  });
+
+  it('matches spoken addresses to properties on file', () => {
+    assert.equal(addressMatches('12 Smith St, Takapuna', '12 Smith Street'), true);
+    assert.equal(addressMatches('12 smith street takapuna auckland', '12 Smith St'), true);
+    assert.equal(addressMatches('14 Smith Street', '12 Smith Street'), false);
+    assert.equal(addressMatches('12 Smith Street', null), false);
+    assert.equal(addressMatches('12', '12'), false); // too short to trust
+  });
+
+  it('normalises urgency and builds titles', () => {
+    assert.equal(normaliseUrgency('Emergency'), 'emergency');
+    assert.equal(normaliseUrgency('urgent'), 'emergency');
+    assert.equal(normaliseUrgency('soon'), 'soon');
+    assert.equal(normaliseUrgency(undefined), 'flexible');
+    assert.equal(requestTitle('Blocked drain', 'emergency'), 'URGENT: Blocked drain');
+    assert.equal(requestTitle('x'.repeat(200), 'soon').length, 78);
+    assert.equal(requestTitle('', 'flexible'), 'Phone enquiry');
+  });
+
+  it('writes a note and owner alert with everything the caller said', () => {
+    const note = requestNote({ callerName: 'Sam Smith', callbackPhone: '021 467 770', address: '12 Smith St', description: 'Leaking tap', urgency: 'soon', addressOnFile: false });
+    assert.match(note, /Caller: Sam Smith/);
+    assert.match(note, /not yet a property/);
+    assert.match(note, /Leaking tap$/);
+    const alert = ownerAlertText({ callerName: 'Sam', callbackPhone: '021 467 770', address: null, description: 'Leak', urgency: 'emergency', loggedInJobber: false });
+    assert.match(alert, /^URGENT new request from Sam \(021 467 770\)/);
+    assert.match(alert, /NOT saved in Jobber/);
   });
 });

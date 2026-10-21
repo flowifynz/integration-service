@@ -29,7 +29,8 @@ client's job management, which they own) and **TNZ** (NZ SMS).
 | Jobber webhook receiver (HMAC, dedupe, enqueue) | Done |
 | TNZ sender + messages log, dedupe, opt-outs, quiet hours | Done — payload shape unconfirmed |
 | STOP handling (TNZ inbound) | Done — payload shape unconfirmed |
-| ElevenLabs tools ×6, call-start, post-call | Stubs (auth, client lookup, tier gates done) |
+| ElevenLabs find_customer, create_request, call-start greeting | Done (step 2), see docs/elevenlabs-agent.md |
+| ElevenLabs booking/reschedule tools, post-call summary | Stubs |
 | Worker: Jobber event → text, nightly reminders | Stubs |
 
 ## Layout
