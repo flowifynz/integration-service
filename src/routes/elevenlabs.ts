@@ -132,7 +132,10 @@ export async function elevenLabsToolRoutes(app: FastifyInstance) {
                 ok: true,
                 found: true,
                 first_name: match.firstName,
-                message: `Existing customer. You may greet them as ${match.firstName}, but confirm their full name and the site address before using any details.`,
+                full_name: match.name,
+                // Confirm, don't ask: "Am I speaking with Tom Jones?" is quicker for the caller,
+                // and only reveals the name to someone holding that customer's phone.
+                message: `Existing customer on file as ${match.name}. Confirm by asking "Am I speaking with ${match.name}?" instead of asking for their name. If they say no, take their full name as normal. Never read out an address or job details; always ask for the site address.`,
               }
             : { ok: true, found: false, message: 'New caller. Take their full name, site address and what they need.' },
         );

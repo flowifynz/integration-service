@@ -27,6 +27,10 @@ node dist/scripts/sql.js "UPDATE clients SET elevenlabs_agent_id = 'agent_XXXXXX
 
 ## 2. Dynamic variables
 
+Deploy any service change that adds a variable **before** publishing an agent change that
+uses it. If the agent asks for a variable the service doesn't send yet, calls drop.
+
+
 Define these on the agent. The call-start webhook returns all six, and ElevenLabs requires
 the webhook to return every variable the agent defines. For browser tests, give them
 placeholder values in the agent's test settings (e.g. `business_name` = Flowify Test Plumbing).
@@ -58,23 +62,26 @@ You cannot book or quote. Never promise a time, a price or that someone will def
 come. Say the team will be in touch.
 
 How to handle a call:
-1. At the start, call find_customer. If it says they're an existing customer, you may use
-   their first name. (If the greeting already used a name, it came from caller ID; confirm
-   it's them before relying on it.) If it says there's no caller ID, ask for the best number to reach
-   them, then call find_customer again with that number as phone.
+1. At the start, call find_customer. If it says there's no caller ID, ask for the best
+   number to reach them, then call find_customer again with that number as phone.
 2. Find out what they need, in their own words. Ask one question at a time.
 3. Ask how urgent it is: an emergency (water or gas leak, no power, flooding, unsafe),
    soon (in the next few days) or flexible.
-4. Get their full name and the site address where the work is. Read the address back to
-   confirm it.
-5. If the number they're calling from isn't the best one to call back on, ask for the best
+4. Name: if find_customer found them, confirm the name it gives you ("Am I speaking with
+   Tom Jones?") instead of asking for it. Otherwise ask for their full name.
+5. Ask for the site address where the work is, even for existing customers, and read it
+   back to confirm.
+6. If the number they're calling from isn't the best one to call back on, ask for the best
    number.
-6. Call create_request with name, phone (only if they gave a different number), address,
-   description and urgency. Then tell them what create_request's message says.
-7. Ask if there's anything else, then say goodbye.
+7. Say a short holding line such as "Thanks, I'll just pop that through to the team, one
+   moment", then call create_request with name, phone (only if they gave a different
+   number), address, description and urgency. Keep description to one or two sentences
+   that capture the job. Then tell them what create_request's message says.
+8. Ask if there's anything else, then say goodbye.
 
-Privacy: never read out an address, job details or anything from the business's records.
-Only use the first name that find_customer gives you.
+Privacy: never read out an address, job details or anything else from the business's
+records. The only thing you may say back from find_customer is the customer's name, to
+confirm it's them.
 
 Emergencies: if someone is in danger, tell them to call 111 first. For a gas smell, tell
 them to leave the building and call their gas provider's emergency line.
@@ -112,11 +119,15 @@ Both tools: **Webhook**, method **POST**, header `x-flowify-secret` = your
 | `agent_id` | Dynamic variable | `system__agent_id` |
 | `caller_number` | Dynamic variable | `system__caller_id` |
 | `conversation_id` | Dynamic variable | `system__conversation_id` |
-| `name` | LLM (required) | Caller's full name |
+| `name` | LLM (required) | Caller's full name (as confirmed, if find_customer found them) |
 | `phone` | LLM (optional) | Best callback number, only if different from the number they're calling from |
 | `address` | LLM | Site address for the job, as confirmed with the caller |
-| `description` | LLM (required) | What needs doing, in the caller's words, including any useful detail |
+| `description` | LLM (required) | What needs doing, in one or two sentences |
 | `urgency` | LLM | One of: emergency, soon, flexible |
+
+**Tool Call Sound** (bottom of the tool settings): **Typing**, behaviour **With pre-speech**.
+The holding line in step 7 of the prompt triggers it, so callers hear typing instead of
+silence while the request is logged.
 
 ## 6. What happens when create_request runs
 
