@@ -3,6 +3,20 @@
 One agent per Flowify client. All agents call the same Flowify URLs; the service works out
 which client a call is for from the dialled number, or from the agent ID in browser tests.
 
+## 0. Phone number (Twilio)
+
+1. Buy the NZ number in Twilio and wait for its regulatory bundle to be approved.
+2. Import it into ElevenLabs (Phone Numbers → Import → Twilio) and assign the agent.
+3. **In Twilio, check the number's active region is US1.** NZ numbers can arrive with the
+   Australia (AU1) region active and no configuration there. Calls then fail with a carrier
+   "number not active" message and never appear in the US1 call logs. Fix: the number's
+   **Regional** tab → **Change active region** → US1. The active configuration should then
+   show `https://api.us.elevenlabs.io/twilio/…`.
+4. Save it on the client (E.164, no spaces):
+   ```bash
+   node dist/scripts/sql.js "UPDATE clients SET agent_phone = '+649XXXXXXX' WHERE slug = '<client-slug>'"
+   ```
+
 ## 1. Link the agent to the client
 
 Copy the agent ID from the agent's page in ElevenLabs (`agent_...`), then in **Render Shell**:
@@ -13,13 +27,14 @@ node dist/scripts/sql.js "UPDATE clients SET elevenlabs_agent_id = 'agent_XXXXXX
 
 ## 2. Dynamic variables
 
-Define these on the agent. The call-start webhook returns all five, and ElevenLabs requires
+Define these on the agent. The call-start webhook returns all six, and ElevenLabs requires
 the webhook to return every variable the agent defines. For browser tests, give them
 placeholder values in the agent's test settings (e.g. `business_name` = Flowify Test Plumbing).
 
 | Variable | Example |
 |---|---|
 | `business_name` | Flowify Test Plumbing |
+| `greeting` | Kia ora Sam (known caller) / Kia ora (anyone else) |
 | `customer_first_name` | Sam (empty for new callers) |
 | `tier` | run |
 | `can_book` | false |
@@ -28,7 +43,7 @@ placeholder values in the agent's test settings (e.g. `business_name` = Flowify 
 ## 3. First message
 
 ```
-Kia ora, you've called {{business_name}}. This is the virtual receptionist. How can I help?
+{{greeting}}, you've called {{business_name}}. This is the virtual receptionist. How can I help?
 ```
 
 ## 4. System prompt
@@ -43,8 +58,9 @@ You cannot book or quote. Never promise a time, a price or that someone will def
 come. Say the team will be in touch.
 
 How to handle a call:
-1. At the start, call find_customer. If it says they're an existing customer, you may greet
-   them by first name. If it says there's no caller ID, ask for the best number to reach
+1. At the start, call find_customer. If it says they're an existing customer, you may use
+   their first name. (If the greeting already used a name, it came from caller ID; confirm
+   it's them before relying on it.) If it says there's no caller ID, ask for the best number to reach
    them, then call find_customer again with that number as phone.
 2. Find out what they need, in their own words. Ask one question at a time.
 3. Ask how urgent it is: an emergency (water or gas leak, no power, flooding, unsafe),

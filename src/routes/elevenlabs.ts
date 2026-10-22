@@ -284,6 +284,8 @@ export async function elevenLabsToolRoutes(app: FastifyInstance) {
       dynamic_variables: {
         business_name: client?.business_name ?? '',
         customer_first_name: firstName,
+        // Ready-made opener for the first message, so new callers don't get "Kia ora ,".
+        greeting: firstName ? `Kia ora ${firstName}` : 'Kia ora',
         tier: client?.tier ?? '',
         can_book: client ? canBook(client) : false,
         can_reschedule: client ? canReschedule(client) : false,
