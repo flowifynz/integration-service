@@ -3,7 +3,7 @@
 // Checked against TNZ REST API v3.00 (OpenAPI spec, Oct 2026):
 //  - POST https://api.tnz.co.nz/api/v3.00/sms, `Authorization: Bearer <token>`, JSON body.
 //  - Fields are top-level (no wrapper object): Message, Destination, MessageID, Reference,
-//    SubAccount, Mode ('Test' = handled as successful without sending), NotificationType,
+//    SubAccount, Department, Mode ('Test' = handled as successful without sending), NotificationType,
 //    WebhookCallbackURL, WebhookCallbackFormat.
 //  - 200 OK → { "MessageID": "..." }. Errors → { "Result": "Failed", "ErrorMessage": [...] }.
 //  - MessageID is ours to set (max 40 chars, alphanumeric). TNZ puts it on any reply it can
@@ -20,6 +20,8 @@ export interface TnzSendInput {
   message: string;
   /** Per-client billing sub-account. */
   subAccount: string | null;
+  /** Message category for TNZ reporting (bookings, owner-alerts, ...). See departmentFor(). */
+  department: string;
   /** Our MessageID: alphanumeric, ≤ 40 chars. See tnzMessageId(). */
   messageId: string;
   /** Human-readable reference shown in TNZ's dashboard, e.g. the client slug + message kind. */
@@ -68,6 +70,7 @@ export function buildTnzPayload(input: TnzSendInput, webhookUrl: string): Record
     NotificationType: 'Webhook',
     WebhookCallbackURL: webhookUrl,
     WebhookCallbackFormat: 'JSON',
+    Department: input.department,
     ...(input.subAccount ? { SubAccount: input.subAccount } : {}),
     ...(input.mode === 'Test' ? { Mode: 'Test' } : {}),
   };

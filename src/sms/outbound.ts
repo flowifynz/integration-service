@@ -6,7 +6,7 @@
 
 import { db, getClientById } from '../db.ts';
 import { formatNational, toE164 } from '../phone.ts';
-import { composeSms, MARKETING_KINDS, type SmsKind } from './compose.ts';
+import { composeSms, departmentFor, MARKETING_KINDS, type SmsKind } from './compose.ts';
 import { quietHoursDeferral } from './quietHours.ts';
 import { sendTnzSms, TnzError, tnzMessageId } from './tnz.ts';
 
@@ -44,11 +44,11 @@ export async function sendClientSms(job: SendSmsJob): Promise<SendSmsResult> {
 
   // 1. Record the message (or find the existing record for this idempotency key).
   const inserted = await db().query<{ id: string; status: string }>(
-    `INSERT INTO messages (client_id, idempotency_key, kind, is_marketing, to_phone, body)
-     VALUES ($1, $2, $3, $4, $5, $6)
+    `INSERT INTO messages (client_id, idempotency_key, kind, is_marketing, to_phone, body, department)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
      ON CONFLICT (idempotency_key) DO NOTHING
      RETURNING id, status`,
-    [client.id, job.idempotencyKey, job.kind, MARKETING_KINDS.has(job.kind), to ?? job.toPhone, body],
+    [client.id, job.idempotencyKey, job.kind, MARKETING_KINDS.has(job.kind), to ?? job.toPhone, body, departmentFor(job.kind)],
   );
   const row =
     inserted.rows[0] ??
@@ -98,6 +98,7 @@ export async function sendClientSms(job: SendSmsJob): Promise<SendSmsResult> {
       to,
       message: body,
       subAccount: client.tnz_subaccount ?? client.slug, // never send untagged
+      department: departmentFor(job.kind),
       messageId: tnzMessageId(row.id, attempt),
       reference: `${client.slug} ${job.kind}`,
       mode: client.sms_mode === 'live' ? 'Live' : 'Test',

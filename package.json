@@ -21,6 +21,7 @@
     "jobber:clients": "node src/scripts/jobberClients.ts",
     "sql": "node src/scripts/sql.ts",
     "sms:test": "node src/scripts/sendTestSms.ts",
+    "sms:usage": "node src/scripts/smsUsage.ts",
     "test": "node --test test/*.test.ts"
   },
   "dependencies": {

@@ -1,12 +1,13 @@
 // POST /tnz/inbound?key=<TNZ_INBOUND_KEY> — TNZ's webhook. Every text we send sets this
 // as its WebhookCallbackURL (JSON), so TNZ posts here for:
-//   - replies from customers (we act on STOP)
-//   - delivery results for our texts (logged for now)
-// Both arrive with the same field set; see sms/inbound.ts.
+//   - the final result of each text we sent (Type 'SMS'): we record price, segments and
+//     delivery status for billing; a "blacklisted" result becomes an opt-out on our side
+//   - replies (Type 'SMSReply' / 'SMSInbound'): we act on STOP
+// See sms/inbound.ts for the payload.
 //
-// Attribution: TNZ puts our outbound MessageID on replies it can match, which gives us the
-// messages row and so the client. Fallback: the SubAccount. If neither works, the number
-// is opted out of every client (safe default for a shared short code).
+// Attribution: TNZ puts our outbound MessageID on results and matched replies, which gives
+// us the messages row and so the client. Fallback for replies: the SubAccount. If neither
+// works, a STOP opts the number out of every client (safe default for a shared short code).
 
 import type { FastifyInstance } from 'fastify';
 import { config } from '../config.ts';
@@ -14,7 +15,7 @@ import { safeEqual } from '../crypto.ts';
 import { db } from '../db.ts';
 import { isMobile, toE164 } from '../phone.ts';
 import { isStopRequest } from '../sms/compose.ts';
-import { extractInbound } from '../sms/inbound.ts';
+import { extractInbound, isBlacklisted, isReply, isSendResult } from '../sms/inbound.ts';
 import { messageRowIdFromTnz } from '../sms/tnz.ts';
 
 export async function tnzInboundRoutes(app: FastifyInstance) {
@@ -24,11 +25,38 @@ export async function tnzInboundRoutes(app: FastifyInstance) {
 
     const body = (req.body && typeof req.body === 'object' ? req.body : {}) as Record<string, unknown>;
     const f = extractInbound(body);
-
-    // First candidate that is a valid NZ mobile; first text that is a STOP request.
-    const phone = f.phoneCandidates.map((p) => toE164(p)).find((p): p is string => Boolean(p && isMobile(p))) ?? null;
-    const isStop = f.textCandidates.some((t) => isStopRequest(t));
     const rowId = messageRowIdFromTnz(f.messageId);
+
+    // ---- Result of a text we sent: record cost + delivery ------------------------------
+    if (isSendResult(f)) {
+      const blacklisted = isBlacklisted(f);
+      req.log.info(
+        { tnz: { type: f.type, status: f.status, result: f.result, ourMessageId: Boolean(rowId), price: f.price, parts: f.smsParts, blacklisted } },
+        'TNZ result',
+      );
+      if (!rowId) return reply.code(200).send();
+
+      const { rows } = await db().query<{ client_id: string; to_phone: string }>(
+        `UPDATE messages
+            SET price = $2, sms_parts = $3, delivery_status = $4, delivery_result = $5, result_at = now()
+          WHERE id = $1
+          RETURNING client_id, to_phone`,
+        [rowId, f.price, f.smsParts, f.status ?? null, f.result ?? f.detail ?? null],
+      );
+      const msg = rows[0];
+      if (msg && blacklisted) {
+        // TNZ has this number on its opt-out list; mirror it so we stop trying.
+        await db().query(
+          `INSERT INTO opt_outs (client_id, phone, source) VALUES ($1, $2, 'tnz_blacklist') ON CONFLICT DO NOTHING`,
+          [msg.client_id, msg.to_phone],
+        );
+      }
+      return reply.code(200).send();
+    }
+
+    // ---- Reply: act on STOP ---------------------------------------------------------
+    const phone = f.phoneCandidates.map((p) => toE164(p)).find((p): p is string => Boolean(p && isMobile(p))) ?? null;
+    const isStop = isReply(f) && f.textCandidates.some((t) => isStopRequest(t));
 
     // Shape only — no numbers, no message text, no API key.
     req.log.info(
@@ -36,7 +64,6 @@ export async function tnzInboundRoutes(app: FastifyInstance) {
         tnz: {
           type: f.type,
           status: f.status,
-          result: f.result,
           hasReceivedId: Boolean(f.receivedId),
           phoneFound: Boolean(phone),
           isStop,
@@ -55,7 +82,10 @@ export async function tnzInboundRoutes(app: FastifyInstance) {
       clientId = rows[0]?.client_id ?? null;
     }
     if (!clientId && f.subAccount) {
-      const { rows } = await db().query<{ id: string }>('SELECT id FROM clients WHERE tnz_subaccount = $1', [f.subAccount]);
+      const { rows } = await db().query<{ id: string }>(
+        'SELECT id FROM clients WHERE tnz_subaccount = $1 OR (tnz_subaccount IS NULL AND slug = $1)',
+        [f.subAccount],
+      );
       if (rows.length === 1) clientId = rows[0]!.id;
     }
 

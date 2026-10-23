@@ -8,9 +8,10 @@ import { verifyElevenLabsSignature } from '../src/elevenlabsSignature.ts';
 import { addressMatches, normaliseUrgency, ownerAlertText, requestNote, requestTitle, splitName } from '../src/jobber/callerText.ts';
 import { accessTokenExpiry } from '../src/jobber/oauth.ts';
 import { parseJobberWebhook, verifyJobberSignature, webhookDedupeKey } from '../src/jobber/webhook.ts';
-import { composeSms, isStopRequest } from '../src/sms/compose.ts';
+import { composeSms, departmentFor, isStopRequest, smsSegments } from '../src/sms/compose.ts';
 import { quietHoursDeferral } from '../src/sms/quietHours.ts';
-import { extractInbound } from '../src/sms/inbound.ts';
+import { extractInbound, isBlacklisted, isReply, isSendResult } from '../src/sms/inbound.ts';
+import { billUsage, reportMonth } from '../src/sms/usage.ts';
 import { buildTnzPayload, messageRowIdFromTnz, tnzMessageId } from '../src/sms/tnz.ts';
 
 describe('token encryption', () => {
@@ -151,7 +152,7 @@ describe('misc', () => {
 
   it('builds a TNZ v3.00 payload (top-level fields, Test mode, sub-account, our MessageID)', () => {
     const p = buildTnzPayload(
-      { to: '+64211234567', message: 'hi', subAccount: 'smith', messageId: tnzMessageId(42, 1), reference: 'smith booking_confirmation', mode: 'Test' },
+      { to: '+64211234567', message: 'hi', subAccount: 'smith', department: 'bookings', messageId: tnzMessageId(42, 1), reference: 'smith booking_confirmation', mode: 'Test' },
       'https://x.test/tnz/inbound?key=k',
     );
     assert.equal(p.Destination, '+64211234567');
@@ -159,9 +160,10 @@ describe('misc', () => {
     assert.equal(p.MessageID, 'flowify42a1');
     assert.equal(p.Mode, 'Test');
     assert.equal(p.SubAccount, 'smith');
+    assert.equal(p.Department, 'bookings');
     assert.equal(p.NotificationType, 'Webhook');
     assert.equal(p.WebhookCallbackFormat, 'JSON');
-    const live = buildTnzPayload({ to: '+64', message: '', subAccount: null, messageId: 'flowify1a1', reference: 'r', mode: 'Live' }, 'u');
+    const live = buildTnzPayload({ to: '+64', message: '', subAccount: null, department: 'owner-alerts', messageId: 'flowify1a1', reference: 'r', mode: 'Live' }, 'u');
     assert.equal('Mode' in live, false);
     assert.equal('SubAccount' in live, false);
   });
@@ -222,5 +224,48 @@ describe('caller text helpers (create_request)', () => {
     const alert = ownerAlertText({ callerName: 'Sam', callbackPhone: '021 467 770', address: null, description: 'Leak', urgency: 'emergency', loggedInJobber: false });
     assert.match(alert, /^URGENT new request from Sam \(021 467 770\)/);
     assert.match(alert, /NOT saved in Jobber/);
+  });
+});
+
+describe('SMS cost tracking (pricing option A)', () => {
+  it('reads price, segments and type from a TNZ result webhook', () => {
+    const f = extractInbound({ Type: 'SMS', MessageID: 'flowify9a1', Status: 'Success', Result: 'delivered', Price: '0.115', Detail: 'SMSParts:2' });
+    assert.equal(isSendResult(f), true);
+    assert.equal(isReply(f), false);
+    assert.equal(f.price, 0.115);
+    assert.equal(f.smsParts, 2);
+    assert.equal(isBlacklisted(f), false);
+    const reply = extractInbound({ Type: 'SMSReply', Message: 'STOP', Price: null });
+    assert.equal(isReply(reply), true);
+    assert.equal(reply.price, null);
+    assert.equal(isBlacklisted(extractInbound({ Type: 'SMS', Status: 'Failed', Result: 'Destination is blacklisted' })), true);
+  });
+
+  it('tags departments, with owner alerts kept separate', () => {
+    assert.equal(departmentFor('visit_reminder'), 'bookings');
+    assert.equal(departmentFor('review_request'), 'reviews');
+    assert.equal(departmentFor('owner_alert'), 'owner-alerts');
+  });
+
+  it('counts segments, flagging macrons and emoji', () => {
+    assert.deepEqual(smsSegments('a'.repeat(160)), { encoding: 'GSM-7', segments: 1 });
+    assert.deepEqual(smsSegments('a'.repeat(161)), { encoding: 'GSM-7', segments: 2 });
+    assert.deepEqual(smsSegments('Kia ora, ' + 'a'.repeat(100)), { encoding: 'GSM-7', segments: 1 });
+    assert.deepEqual(smsSegments('Kia ora Māori ' + 'a'.repeat(100)), { encoding: 'UCS-2', segments: 2 });
+    assert.equal(smsSegments('{}').segments, 1); // extension chars count double but still fit
+  });
+
+  it('bills overage against the allowance', () => {
+    assert.deepEqual(billUsage({ billableSegments: 250, allowance: 300, overageCents: 20 }), { overageSegments: 0, overageCharge: 0, allowanceUsed: 250 / 300 });
+    assert.deepEqual(billUsage({ billableSegments: 347, allowance: 300, overageCents: 20 }), { overageSegments: 47, overageCharge: 9.4, allowanceUsed: 347 / 300 });
+    assert.equal(billUsage({ billableSegments: 999, allowance: null, overageCents: 20 }).overageCharge, 0);
+  });
+
+  it('defaults the report to last month in NZ time', () => {
+    assert.equal(reportMonth(undefined, new Date('2026-11-05T00:00:00Z')), '2026-10');
+    assert.equal(reportMonth(undefined, new Date('2026-01-10T00:00:00Z')), '2025-12');
+    assert.equal(reportMonth(undefined, new Date('2026-10-31T12:00:00Z')), '2026-10'); // already 1 Nov in NZ
+    assert.equal(reportMonth('2026-07'), '2026-07');
+    assert.throws(() => reportMonth('July'));
   });
 });

@@ -60,6 +60,8 @@ export interface ClientRow {
   sms_mode: 'test' | 'live';
   monthly_minutes_cap: number | null;
   elevenlabs_agent_id: string | null;
+  sms_allowance_segments: number | null;
+  sms_overage_cents: string | null; // numeric comes back from pg as a string
 }
 
 export async function getClientById(id: string): Promise<ClientRow | null> {
