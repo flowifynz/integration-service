@@ -530,3 +530,136 @@ describe('onboarding script (D5)', () => {
     assert.deepEqual(cols, { status: 'active', sms_mode: 'live' });
   });
 });
+
+import { callCategory, callerConfirmationText, callerDetails, extractPostCall, planPostCall } from '../src/calls/postCall.ts';
+
+describe('post-call processing (D3)', () => {
+  const payload = (over: { transcript?: unknown[]; collected?: Record<string, unknown>; duration?: number; phoneCall?: boolean } = {}) => ({
+    type: 'post_call_transcription',
+    event_timestamp: 1761200000,
+    data: {
+      agent_id: 'agent_abc',
+      conversation_id: 'conv_1',
+      status: 'done',
+      transcript: over.transcript ?? [
+        { role: 'agent', message: 'Kia ora', time_in_call_secs: 0 },
+        { role: 'user', message: 'My tap is leaking', time_in_call_secs: 3 },
+        {
+          role: 'agent',
+          message: null,
+          tool_calls: [{ tool_name: 'create_request', params_as_json: JSON.stringify({ name: 'Sam Smith', address: '12 Smith St', description: 'Leaking tap', urgency: 'soon' }) }],
+        },
+        { role: 'agent', message: null, tool_results: [{ tool_name: 'create_request', result_value: JSON.stringify({ ok: true, logged: false }) }] },
+      ],
+      metadata: {
+        start_time_unix_secs: 1761199900,
+        call_duration_secs: 95,
+        termination_reason: 'end_call tool',
+        ...(over.phoneCall === false ? {} : { phone_call: { external_number: '+64211234567', agent_number: '+6495551234', type: 'twilio' } }),
+      },
+      analysis: {
+        call_successful: 'success',
+        transcript_summary: 'Sam called about a leaking tap.',
+        data_collection_results: Object.fromEntries(Object.entries(over.collected ?? {}).map(([k, v]) => [k, { data_collection_id: k, value: v }])),
+      },
+      conversation_initiation_client_data: { dynamic_variables: { system__caller_id: '+64217654321', system__called_number: '+6495550000' } },
+    },
+  });
+
+  it('reads numbers, timing, summary and the create_request call', () => {
+    const info = extractPostCall(payload());
+    assert.equal(info.conversationId, 'conv_1');
+    assert.equal(info.callerNumber, '+64211234567'); // phone_call wins over system vars
+    assert.equal(info.calledNumber, '+6495551234');
+    assert.equal(info.durationSecs, 95);
+    assert.equal(info.startedAt?.toISOString(), new Date(1761199900 * 1000).toISOString());
+    assert.equal(info.requestTool.called, true);
+    assert.equal(info.requestTool.logged, false);
+    assert.equal(info.requestTool.args?.name, 'Sam Smith');
+    assert.equal(info.userSpoke, true);
+  });
+
+  it('falls back to system__ variables for phone numbers', () => {
+    const info = extractPostCall(payload({ phoneCall: false }));
+    assert.equal(info.callerNumber, '+64217654321');
+    assert.equal(info.calledNumber, '+6495550000');
+  });
+
+  it('copes with junk', () => {
+    const info = extractPostCall({ nonsense: true });
+    assert.equal(info.conversationId, null);
+    assert.equal(info.requestTool.called, false);
+  });
+
+  it('categorises calls', () => {
+    assert.equal(callCategory(extractPostCall(payload())), 'new_job');
+    assert.equal(callCategory(extractPostCall(payload({ transcript: [], collected: { call_category: 'sales_spam' } }))), 'other');
+    assert.equal(callCategory(extractPostCall(payload({ transcript: [{ role: 'agent', message: 'Kia ora' }] }))), 'no_conversation');
+    assert.equal(callCategory(extractPostCall(payload({ transcript: [{ role: 'user', message: 'Hi there' }] }))), 'unknown');
+  });
+
+  it('Core: tool ran but Jobber failed -> create after the call, short owner follow-up, thank the caller', () => {
+    const plan = planPostCall(extractPostCall(payload()), { tier: 'core', jobberRequestId: null, callerTextsOn: true });
+    assert.deepEqual(plan, { category: 'new_job', createRequest: true, ownerText: 'saved_after_call', callerText: true, needsReview: null });
+  });
+
+  it('Core: already logged during the call -> only the thank-you text', () => {
+    const plan = planPostCall(extractPostCall(payload()), { tier: 'core', jobberRequestId: 'req_1', callerTextsOn: true });
+    assert.equal(plan.createRequest, false);
+    assert.equal(plan.ownerText, null);
+    assert.equal(plan.callerText, true);
+  });
+
+  it('Core: never creates a duplicate when the tool said logged: true', () => {
+    const p = payload();
+    (p.data.transcript[3] as { tool_results: { result_value: string }[] }).tool_results[0]!.result_value = JSON.stringify({ ok: true, logged: true });
+    const plan = planPostCall(extractPostCall(p), { tier: 'core', jobberRequestId: null, callerTextsOn: true });
+    assert.equal(plan.createRequest, false);
+  });
+
+  it('Core: tool never ran, data collection has the details -> create + full owner text', () => {
+    const info = extractPostCall(payload({
+      transcript: [{ role: 'user', message: 'Need a sparky' }],
+      collected: { call_category: 'new_job', caller_name: 'Kim Tane', job_description: 'Power out in kitchen', is_emergency: 'yes' },
+    }));
+    const plan = planPostCall(info, { tier: 'core', jobberRequestId: null, callerTextsOn: true });
+    assert.equal(plan.createRequest, true);
+    assert.equal(plan.ownerText, 'new_request');
+    assert.equal(callerDetails(info).urgency, 'emergency');
+  });
+
+  it('Core: new job without a name -> no request, owner told, flagged for review', () => {
+    const info = extractPostCall(payload({ transcript: [{ role: 'user', message: 'hello' }], collected: { call_category: 'new_job' } }));
+    const plan = planPostCall(info, { tier: 'core', jobberRequestId: null, callerTextsOn: true });
+    assert.equal(plan.createRequest, false);
+    assert.equal(plan.ownerText, 'new_request');
+    assert.match(plan.needsReview ?? '', /no name/);
+  });
+
+  it('Base: owner always gets the summary for a new job; never touches Jobber', () => {
+    const plan = planPostCall(extractPostCall(payload()), { tier: 'base', jobberRequestId: null, callerTextsOn: true });
+    assert.equal(plan.createRequest, false);
+    assert.equal(plan.ownerText, 'new_request');
+  });
+
+  it('other calls get no texts; unknown calls are flagged for review', () => {
+    const other = planPostCall(extractPostCall(payload({ transcript: [], collected: { call_category: 'sales_spam' } })), { tier: 'core', jobberRequestId: null, callerTextsOn: true });
+    assert.deepEqual([other.createRequest, other.ownerText, other.callerText], [false, null, false]);
+    const unknown = planPostCall(extractPostCall(payload({ transcript: [{ role: 'user', message: 'Hi' }] })), { tier: 'core', jobberRequestId: null, callerTextsOn: true });
+    assert.ok(unknown.needsReview);
+  });
+
+  it('caller text is one GSM-7 segment once signed', () => {
+    const body = composeSms('call_confirmation', callerConfirmationText('Dave'), { business_name: 'Smith Plumbing & Gas', agent_phone_display: '09 555 1234' });
+    assert.equal(smsSegments(body).encoding, 'GSM-7');
+    assert.ok(smsSegments(body).segments <= 1, body);
+    assert.equal(departmentFor('call_confirmation'), 'calls');
+  });
+
+  it('owner alert text is GSM-7 even when truncated', () => {
+    const long = ownerAlertText({ callerName: 'Sam', callbackPhone: null, phoneSource: 'none', address: null, description: 'x'.repeat(300), urgency: 'soon', loggedInJobber: false });
+    assert.equal(smsSegments(long).encoding, 'GSM-7');
+    const base = ownerAlertText({ callerName: 'Sam', callbackPhone: null, phoneSource: 'none', address: null, description: 'Leak', urgency: 'soon', loggedInJobber: null });
+    assert.doesNotMatch(base, /Jobber/);
+  });
+});

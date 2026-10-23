@@ -6,6 +6,7 @@
 // 3. Jobber events stuck in 'received' over an hour → re-queue them + alert.
 // 4. Worker jobs waiting over 30 minutes → alert.
 // 5. Alert texts stuck in 'queued' → re-queue.
+// 6. Calls not processed after 15 minutes → re-queue; processing errors → alert.
 //
 // With Google Chat set up, alerts post any time. Text-only setups only alert 7am–9pm NZ.
 // Event alerts (refresh failed, app removed) are sent straight away, any time.
@@ -40,6 +41,14 @@ export async function runHealthCheck(opts: { anyTime?: boolean } = {}): Promise<
 
   // Chat posts don't wake anyone, so with Chat set up the check alerts any time.
   // Text-only setups keep the 7am-9pm window.
+  // Calls the post-call job never picked up (queue hiccup): process them now.
+  const stuckCalls = await db().query<{ conversation_id: string }>(
+    `SELECT conversation_id FROM calls
+      WHERE processing_status = 'pending' AND created_at < now() - interval '15 minutes' AND created_at > now() - interval '7 days'`,
+  );
+  for (const c of stuckCalls.rows) await boss.send(Queues.POST_CALL, { conversationId: c.conversation_id });
+  if (stuckCalls.rowCount) log.push(`re-queued ${stuckCalls.rowCount} unprocessed call(s)`);
+
   if (!opts.anyTime && !config.alerts.googleChatWebhookUrl && !isAlertDaytime()) {
     log.push('outside 7am-9pm NZ: alert texts held until morning');
     return log;
@@ -66,6 +75,15 @@ export async function runHealthCheck(opts: { anyTime?: boolean } = {}): Promise<
   );
   for (const f of failures.rows) {
     if (await raiseAlert({ kind: 'sms_failures', clientId: f.client_id, detail: Number(f.n) })) log.push(`alert sms_failures ${f.client_id}`);
+  }
+
+  // Calls whose processing failed (after pg-boss retries) in the last day.
+  const failedCalls = await db().query<{ client_id: string | null; n: string }>(
+    `SELECT client_id, count(*) AS n FROM calls
+      WHERE processing_status = 'error' AND created_at > now() - interval '24 hours' GROUP BY client_id`,
+  );
+  for (const f of failedCalls.rows) {
+    if (await raiseAlert({ kind: 'calls_failed', clientId: f.client_id, detail: Number(f.n) })) log.push(`alert calls_failed ${f.client_id ?? ''}`);
   }
 
   if (stuckEvents.rowCount) {

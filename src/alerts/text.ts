@@ -12,6 +12,7 @@ export type AlertKind =
   | 'sms_failures' // several texts for one client failed in 24h
   | 'stuck_webhooks' // Jobber events not processed for over an hour
   | 'queue_backlog' // worker jobs waiting too long
+  | 'calls_failed' // post-call processing failed for some calls
   | 'test'; // npm run alerts:test
 
 export interface AlertContext {
@@ -62,6 +63,9 @@ export function alertText(kind: AlertKind, ctx: AlertContext = {}): string {
     case 'queue_backlog':
       text = `FLOWIFY ALERT: ${detail} worker jobs waiting over 30 min. Check flowify-worker is running.`;
       break;
+    case 'calls_failed':
+      text = `FLOWIFY ALERT: ${who} - ${detail} call(s) could not be processed after the call. Check calls.processing_error.`;
+      break;
     case 'test':
       text = `FLOWIFY: test alert${detail ? ` - ${detail}` : ''}. Alerts reach this phone.`;
       break;
@@ -95,6 +99,8 @@ export function alertChatText(kind: AlertKind, ctx: AlertContext & { connectLink
       return `🟠 *${detail} Jobber events waiting over an hour*\nThe health check re-queued them. Check flowify-worker is running.`;
     case 'queue_backlog':
       return `🟠 *${detail} worker jobs waiting over 30 minutes*\nCheck flowify-worker is running.`;
+    case 'calls_failed':
+      return `🟠 *${who}: ${detail} call(s) not processed after the call*\nNo thank-you text or after-call Jobber request for these. Check \`calls.processing_error\` and the flowify-worker logs.`;
     case 'test':
       return `✅ *Test alert*${detail ? ` (${detail})` : ''}\nFlowify alerts reach this space.`;
   }

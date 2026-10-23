@@ -9,7 +9,7 @@
 //   POST /elevenlabs/tools/reschedule_appointment  stub (step 6)
 // Webhooks:
 //   POST /elevenlabs/call-start   personalisation: greet a known caller by first name
-//   POST /elevenlabs/post-call    store the call (owner summary text: step 7)
+//   POST /elevenlabs/post-call    store the call, then the worker texts and fills gaps (D3)
 //
 // Every tool and the call-start webhook must send header `x-flowify-secret`.
 // Which client a call belongs to: `called_number` ({{system__called_number}}, the number
@@ -26,8 +26,10 @@ import { safeEqual } from '../crypto.ts';
 import { type ClientRow, db } from '../db.ts';
 import { verifyElevenLabsSignature } from '../elevenlabsSignature.ts';
 import { Sentry } from '../instrument.ts';
-import { addressMatches, confirmName, looksMadeUp, normaliseUrgency, type PhoneSource, ownerAlertText, requestNote, requestTitle, splitName } from '../jobber/callerText.ts';
-import { createJobberClient, createJobberRequest, findClientsByPhone, findPropertyId, pickClient } from '../jobber/clients.ts';
+import { logJobberRequest, resolveClient } from '../calls/logRequest.ts';
+import { extractPostCall } from '../calls/postCall.ts';
+import { confirmName, looksMadeUp, normaliseUrgency, type PhoneSource, ownerAlertText } from '../jobber/callerText.ts';
+import { findClientsByPhone, pickClient } from '../jobber/clients.ts';
 import { formatNational, toE164 } from '../phone.ts';
 import { getBoss, Queues } from '../queue.ts';
 import type { SendSmsJob } from '../sms/outbound.ts';
@@ -41,27 +43,6 @@ interface ToolBody {
 }
 
 const str = (v: unknown): string | null => (typeof v === 'string' && v.trim() ? v.trim() : null);
-
-/** The Flowify client a call belongs to: by dialled number, else by ElevenLabs agent id. */
-async function resolveClient(body: { called_number?: unknown; agent_id?: unknown }): Promise<ClientRow | null> {
-  const dialled = toE164(str(body.called_number));
-  if (dialled) {
-    const { rows } = await db().query<ClientRow>(
-      `SELECT * FROM clients WHERE agent_phone = $1 AND status IN ('active', 'onboarding')`,
-      [dialled],
-    );
-    if (rows[0]) return rows[0];
-  }
-  const agentId = str(body.agent_id);
-  if (agentId) {
-    const { rows } = await db().query<ClientRow>(
-      `SELECT * FROM clients WHERE elevenlabs_agent_id = $1 AND status IN ('active', 'onboarding')`,
-      [agentId],
-    );
-    if (rows[0]) return rows[0];
-  }
-  return null;
-}
 
 const notImplemented = (reply: FastifyReply, tool: string) =>
   reply.send({
@@ -199,33 +180,7 @@ export async function elevenLabsToolRoutes(app: FastifyInstance) {
 
       let requestId: string | null = null;
       try {
-        const matches = matchPhone ? await findClientsByPhone(client.id, matchPhone, { timeoutMs: 4_000 }) : [];
-        const existing = pickClient(matches, name);
-        let jobberClientId: string;
-        let propertyId: string | null = null;
-        if (existing) {
-          jobberClientId = existing.id;
-          if (address) propertyId = await findPropertyId(client.id, existing.id, (street1) => addressMatches(address, street1));
-        } else {
-          const created = await createJobberClient(client.id, { ...splitName(name), e164: matchPhone, address });
-          jobberClientId = created.client.id;
-          propertyId = created.propertyId;
-        }
-        const result = await createJobberRequest(client.id, {
-          jobberClientId,
-          propertyId,
-          title: requestTitle(description, urgency),
-          note: requestNote({
-            callerName: name,
-            callbackPhone: callbackDisplay,
-            phoneSource,
-            address,
-            description,
-            urgency,
-            addressOnFile: Boolean(propertyId),
-          }),
-        });
-        requestId = result.requestId;
+        requestId = await logJobberRequest(client, { name, matchPhone, callbackDisplay, phoneSource, address, description, urgency });
       } catch (err) {
         req.log.error({ err, clientId: client.id }, 'create_request: Jobber failed');
         Sentry.captureException(err);
@@ -240,11 +195,15 @@ export async function elevenLabsToolRoutes(app: FastifyInstance) {
       if (conversationId) {
         await db()
           .query(
-            `INSERT INTO calls (conversation_id, client_id, caller_phone, outcome, jobber_request_id)
-             VALUES ($1, $2, $3, 'request_logged', $4)
+            // COALESCE: a second create_request in the same call that fails must not wipe the first one's ID.
+            `INSERT INTO calls (conversation_id, client_id, caller_phone, outcome, jobber_request_id, request_source)
+             VALUES ($1, $2, $3, $4, $5, CASE WHEN $5::text IS NULL THEN NULL ELSE 'tool' END)
              ON CONFLICT (conversation_id) DO UPDATE
-               SET client_id = EXCLUDED.client_id, outcome = EXCLUDED.outcome, jobber_request_id = EXCLUDED.jobber_request_id`,
-            [conversationId, client.id, callerId, requestId],
+               SET client_id = EXCLUDED.client_id,
+                   outcome = CASE WHEN calls.jobber_request_id IS NOT NULL THEN calls.outcome ELSE EXCLUDED.outcome END,
+                   jobber_request_id = COALESCE(calls.jobber_request_id, EXCLUDED.jobber_request_id),
+                   request_source = COALESCE(calls.request_source, EXCLUDED.request_source)`,
+            [conversationId, client.id, callerId, requestId ? 'request_logged' : 'request_failed', requestId],
           )
           .catch((err) => req.log.error({ err }, 'calls upsert failed'));
       }
@@ -329,6 +288,9 @@ export async function elevenLabsToolRoutes(app: FastifyInstance) {
 }
 
 // Post-call webhook: signed by ElevenLabs (HMAC over the raw body), so it needs the raw body.
+// Stores the call and queues processing (calls/processCall.ts); answers fast so ElevenLabs
+// doesn't retry. Only post_call_transcription is used: post_call_audio is ignored (it would
+// overwrite the transcript), and so is call_initiation_failure (outbound calls only).
 export async function elevenLabsPostCallRoutes(app: FastifyInstance) {
   app.addContentTypeParser('application/json', { parseAs: 'buffer' }, (_req, body, done) => done(null, body));
 
@@ -337,13 +299,47 @@ export async function elevenLabsPostCallRoutes(app: FastifyInstance) {
     if (!verifyElevenLabsSignature(raw, req.headers['elevenlabs-signature'] as string | undefined, config.elevenlabs.webhookSecret)) {
       return reply.code(401).send();
     }
-    const payload = JSON.parse(raw.toString('utf8')) as { data?: { conversation_id?: string } };
-    // create_request may already have made this row; keep its fields and add the payload.
+    let payload: unknown;
+    try {
+      payload = JSON.parse(raw.toString('utf8'));
+    } catch {
+      return reply.code(400).send();
+    }
+    const info = extractPostCall(payload);
+    if (info.type !== 'post_call_transcription' || !info.conversationId) {
+      req.log.info({ type: info.type }, 'post-call webhook ignored');
+      return reply.code(200).send();
+    }
+
+    // create_request may already have made this row; keep its fields and add the rest.
     await db().query(
-      `INSERT INTO calls (conversation_id, payload) VALUES ($1, $2)
-       ON CONFLICT (conversation_id) DO UPDATE SET payload = EXCLUDED.payload`,
-      [payload.data?.conversation_id ?? null, raw.toString('utf8')],
+      `INSERT INTO calls (conversation_id, payload, agent_id, called_number, caller_phone, started_at, duration_seconds,
+                          summary, termination_reason, call_successful, processing_status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'pending')
+       ON CONFLICT (conversation_id) DO UPDATE SET
+         payload = EXCLUDED.payload, agent_id = EXCLUDED.agent_id, called_number = EXCLUDED.called_number,
+         caller_phone = COALESCE(calls.caller_phone, EXCLUDED.caller_phone), started_at = EXCLUDED.started_at,
+         duration_seconds = EXCLUDED.duration_seconds, summary = EXCLUDED.summary,
+         termination_reason = EXCLUDED.termination_reason, call_successful = EXCLUDED.call_successful,
+         processing_status = CASE WHEN calls.processing_status = 'done' THEN 'done' ELSE 'pending' END`,
+      [
+        info.conversationId,
+        raw.toString('utf8'),
+        info.agentId,
+        toE164(info.calledNumber),
+        toE164(info.callerNumber),
+        info.startedAt,
+        info.durationSecs === null ? null : Math.round(info.durationSecs),
+        info.summary,
+        info.terminationReason,
+        info.callSuccessful,
+      ],
     );
+    try {
+      await (await getBoss()).send(Queues.POST_CALL, { conversationId: info.conversationId }, { singletonKey: info.conversationId });
+    } catch (err) {
+      req.log.error({ err }, 'post-call queue failed'); // the hourly health check re-queues pending calls
+    }
     return reply.code(200).send();
   });
 }

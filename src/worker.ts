@@ -4,6 +4,7 @@
 import { Sentry } from './instrument.ts';
 import { sendAdminAlert } from './alerts/alerts.ts';
 import { runHealthCheck } from './alerts/healthCheck.ts';
+import { processCall } from './calls/processCall.ts';
 import { type FollowUpCheck, handleJobberEvent, runCheck, runDayBeforeReminders } from './automation/run.ts';
 import { closeDb, db } from './db.ts';
 import { getBoss, Queues, stopBoss } from './queue.ts';
@@ -59,6 +60,19 @@ await boss.work<FollowUpCheck>(Queues.FOLLOW_UP_CHECK, async ([job]) => {
 await boss.work<{ date: string }>(Queues.DAY_BEFORE_REMINDERS, async ([job]) => {
   if (!job) return;
   await runDayBeforeReminders(job.data.date);
+});
+
+// ---- post-call ---------------------------------------------------------------------
+await boss.work<{ conversationId: string }>(Queues.POST_CALL, async ([job]) => {
+  if (!job) return;
+  try {
+    console.log(`[call ${job.data.conversationId}] ${await processCall(job.data.conversationId)}`);
+  } catch (err) {
+    await db()
+      .query(`UPDATE calls SET processing_status = 'error', processing_error = $2 WHERE conversation_id = $1`, [job.data.conversationId, (err as Error).message])
+      .catch(() => {});
+    throw err; // pg-boss retries
+  }
 });
 
 // ---- send-admin-alert ---------------------------------------------------------------

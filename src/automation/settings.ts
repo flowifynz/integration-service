@@ -22,6 +22,8 @@ export interface AutomationSettings {
   staleAfterDays: number;
   /** Don't confirm visits booked further ahead than this (reminders still go). */
   confirmWithinDays: number;
+  /** Thank-you text to a caller after a new-job call (T1). */
+  callerConfirmations: boolean;
 }
 
 export const DEFAULT_AUTOMATION: AutomationSettings = {
@@ -37,6 +39,7 @@ export const DEFAULT_AUTOMATION: AutomationSettings = {
   reviewCooldownDays: 180,
   staleAfterDays: 3,
   confirmWithinDays: 60,
+  callerConfirmations: true,
 };
 
 export function automationSettings(raw: unknown): AutomationSettings {

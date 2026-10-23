@@ -87,12 +87,16 @@ export interface RequestNoteInput {
   description: string;
   urgency: Urgency;
   addressOnFile: boolean;
+  /** Created by the post-call safety net, not by the receptionist during the call. */
+  afterCall?: boolean;
 }
 
 /** Full detail for the request note, so nothing the caller said is lost. */
 export function requestNote(n: RequestNoteInput): string {
   return [
-    'Logged by the Flowify AI receptionist.',
+    n.afterCall
+      ? "Logged by Flowify after the call (the receptionist couldn't save it during the call)."
+      : 'Logged by the Flowify AI receptionist.',
     `Caller: ${n.callerName}`,
     n.callbackPhone ? `Callback: ${n.callbackPhone} (${phoneSourceLabel(n.phoneSource)})` : 'Callback: no number given',
     n.address ? `Site: ${n.address}${n.addressOnFile ? '' : ' (not yet a property on this client — please add)'}` : 'Site: not given',
@@ -112,16 +116,18 @@ export function ownerAlertText(n: {
   address: string | null;
   description: string;
   urgency: Urgency;
-  loggedInJobber: boolean;
+  /** true = in Jobber, false = Jobber failed, null = no Jobber (Base). */
+  loggedInJobber: boolean | null;
 }): string {
+  // Plain GSM-7 only: one en/em dash or ellipsis would make the whole text cost 2-3x.
   const head = n.urgency === 'emergency' ? 'URGENT new request' : 'New request';
-  const d = n.description.length > 200 ? `${n.description.slice(0, 197)}…` : n.description;
+  const d = n.description.length > 200 ? `${n.description.slice(0, 197)}...` : n.description;
   return [
     `${head} from ${n.callerName}${n.callbackPhone ? ` (${n.callbackPhone})` : ' (NO callback number)'}`,
     n.phoneSource === 'spoken_no_caller_id' ? 'Number said on the call, caller ID hidden: not verified.' : null,
     n.address ? `Site: ${n.address}` : null,
     d,
-    n.loggedInJobber ? 'In Jobber under Requests.' : 'NOT saved in Jobber (connection problem) — please add it manually.',
+    n.loggedInJobber === null ? null : n.loggedInJobber ? 'In Jobber under Requests.' : 'NOT saved in Jobber (connection problem) - please add it manually.',
   ]
     .filter(Boolean)
     .join('\n');

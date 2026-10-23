@@ -15,6 +15,8 @@ export const Queues = {
   DAY_BEFORE_REMINDERS: 'day-before-reminders',
   /** Text one admin_alerts row to Jaron (see alerts/alerts.ts). */
   SEND_ADMIN_ALERT: 'send-admin-alert',
+  /** Act on one finished call: record, safety-net request, texts (see calls/processCall.ts). */
+  POST_CALL: 'post-call',
   /** Hourly: repeat unresolved alerts, find stuck events and backed-up queues. */
   HEALTH_CHECK: 'health-check',
 } as const;

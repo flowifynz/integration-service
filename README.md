@@ -41,7 +41,8 @@ The full backlog (D1–D12) lives in Notion: Flowify Builds › Flowify Service 
 | TNZ sender + messages log, dedupe, opt-outs, quiet hours | Done — payload shape unconfirmed |
 | STOP handling (TNZ inbound) | Done — payload shape unconfirmed |
 | ElevenLabs find_customer, create_request, call-start greeting | Done (step 2), see docs/elevenlabs-agent.md |
-| ElevenLabs booking/reschedule tools, post-call summary | Stubs (backlog D9, D3) |
+| ElevenLabs booking/reschedule tools | Stubs (backlog D9) |
+| After-call processing: call record, caller thank-you text, Core safety-net request, Base owner text | Done (D3), see docs/post-call.md |
 | Worker: Jobber-driven texts (confirmations, reminders, quote/invoice follow-ups, reviews) | Done (step 4), see docs/jobber-texts.md |
 | TNZ cost tracking + monthly usage report (`sms:usage`) | Done |
 | Base mode, missed-call text-back | Not built (D1, D2) |

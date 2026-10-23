@@ -14,6 +14,7 @@ export type SmsKind =
   | 'invoice_followup'
   | 'review_request'
   | 'missed_call'
+  | 'call_confirmation'
   | 'owner_alert';
 
 const BOOKING_KINDS: ReadonlySet<SmsKind> = new Set(['booking_confirmation', 'reschedule_confirmation', 'visit_reminder']);
@@ -37,13 +38,15 @@ export function departmentFor(kind: SmsKind): string {
       return 'reviews';
     case 'missed_call':
       return 'missed-calls';
+    case 'call_confirmation':
+      return 'calls';
     case 'owner_alert':
       return 'owner-alerts';
   }
 }
 
 /** Departments that count against the client's monthly allowance. */
-export const BILLABLE_DEPARTMENTS: readonly string[] = ['bookings', 'follow-ups', 'reviews', 'missed-calls'];
+export const BILLABLE_DEPARTMENTS: readonly string[] = ['bookings', 'follow-ups', 'reviews', 'missed-calls', 'calls'];
 
 /**
  * Segments a text will use. 160 chars per single part (153 per part when split) for plain
