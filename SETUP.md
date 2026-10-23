@@ -133,11 +133,10 @@ reconnect afterwards.
 **Render Shell** (flowify-web → Shell):
 
 ```bash
-node dist/scripts/sql.js "INSERT INTO clients (slug, business_name, tier, owner_name, owner_mobile, owner_email, monthly_minutes_cap) VALUES ('flowify-test', 'Flowify Test Plumbing', 'run', 'Jaron', '+6421XXXXXXX', 'jaron@flowify.nz', 100)"
-node dist/scripts/sql.js "SELECT slug, business_name, tier, status, sms_mode FROM clients"
+node dist/scripts/onboardClient.js --slug flowify-test --name "Flowify Test Plumbing" --tier core --agent-phone "<Twilio number>" --owner-mobile "<your mobile>" --owner-name Jaron --owner-email jaron@flowify.nz
 ```
 
-`agent_phone` stays empty until there's a Twilio number for the ElevenLabs agent.
+(For a new client use the same command; see README → Onboarding a client.)
 `sms_mode` defaults to `test`.
 
 ## 8. Connect Jobber (build step 1 "done")

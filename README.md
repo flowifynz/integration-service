@@ -11,9 +11,8 @@ own) and **TNZ** (NZ SMS).
 | **Base** | AI receptionist + missed-call text-back. No Jobber. Needs *Base mode* (backlog D1–D3), not built yet | $495 setup, $149/mo |
 | **Core** | Base + Jobber: requests from calls, Jobber-driven texts, live booking once built (D9) | from $1,495 setup, $450/mo |
 
-The database still uses the old tier values: `run` (= Core, capture only) and `receptionist`
-(= Core with booking tools). Renaming them to `base` / `core` is backlog item D11 (a migration
-plus the `tier` / `can_book` call-start variables), so keep using `run` for now.
+`clients.tier` is `base` or `core` (migration 007 renamed the old `run` / `receptionist`).
+Live booking is switched on per Core client with `booking_mode` / `rescheduling_enabled`.
 The full backlog (D1–D12) lives in Notion: Flowify Builds › Flowify Service Build Backlog.
 
 ```
@@ -47,7 +46,8 @@ The full backlog (D1–D12) lives in Notion: Flowify Builds › Flowify Service 
 | TNZ cost tracking + monthly usage report (`sms:usage`) | Done |
 | Base mode, missed-call text-back | Not built (D1, D2) |
 | Alerts to Jaron (Google Chat, optional text) + hourly health check | Done (D4), see docs/alerts.md |
-| Go-live readiness: onboarding script, minutes cap, weekly calls-vs-Jobber check | Not built (D5, D6, D7) |
+| Onboarding script (`onboardClient.js`), tiers renamed base/core | Done (D5, D11) |
+| Minutes cap, weekly calls-vs-Jobber check | Not built (D6, D7) |
 
 ## Layout
 
@@ -111,20 +111,32 @@ see **SETUP.md**.
   when booking is built. Keep them minimal, since reviewers check.
 - **Test in GraphiQL invalidates the app's refresh tokens for that account.** Reconnect afterwards.
 
-## Onboarding a client (until the onboarding script, D5, exists)
+## Onboarding a client
 
-Core client today: `tier` = `'run'`, `monthly_minutes_cap` = 300 (100 for Base once Base mode exists).
-
-```sql
-INSERT INTO clients (slug, business_name, tier, agent_phone, owner_mobile, owner_email,
-                     tnz_subaccount, monthly_minutes_cap)
-VALUES ('smith-plumbing', 'Smith Plumbing', 'run', '+6495551234', '+64211234567',
-        'owner@example.co.nz', 'smith-plumbing', 300);
-```
+One command in Render Shell (flowify-web) creates the client with its plan's defaults,
+sets the TNZ SubAccount to the slug, and prints the Jobber connect link (Core):
 
 ```bash
-# in Render Shell (flowify-web):
-node dist/scripts/connectLink.js smith-plumbing     # send this link to the client
+node dist/scripts/onboardClient.js --slug smith-plumbing --name "Smith Plumbing" --tier core \
+  --agent-phone "09 555 1234" --owner-mobile "021 123 4567" --owner-name Dave \
+  --owner-email dave@smithplumbing.co.nz --agent-id agent_abc123
+node dist/scripts/onboardClient.js --help        # every option
+```
+
+Re-run with the same `--slug` to change anything (only the options you give change). Add
+`--dry-run` to preview. When the R3 tests pass, switch the client on (status `active`, TNZ Live):
+
+```bash
+node dist/scripts/onboardClient.js --slug smith-plumbing --go-live
+```
+
+`--go-live` refuses if the agent ID, Twilio number or owner mobile is missing, or (Core) Jobber
+isn't connected. Plan defaults (minutes, SMS allowance) live in `src/onboarding/settings.ts`.
+
+Other Render Shell commands:
+
+```bash
+node dist/scripts/connectLink.js smith-plumbing     # a fresh connect link
 node dist/scripts/jobberClients.js smith-plumbing   # after they connect: proves the connection works
 node dist/scripts/sql.js "SELECT ..."                # one-off SQL
 node dist/scripts/sendTestSms.js smith-plumbing 021...  # test text
@@ -151,7 +163,7 @@ Marked in code with comments. None of these are verified yet:
 
 ## Decisions taken in this scaffold
 
-- Added a sixth tool, `create_request`, for Core (old "Run" tier) (the five-tool list has no way to log
+- Added a sixth tool, `create_request`, for Core (the five-tool list has no way to log
   a request mid-call). Alternative: create it from the post-call webhook.
 - Opt-outs with no client attached block that number for every client (shared short code).
 - Owner alerts skip quiet hours; customer texts don't.

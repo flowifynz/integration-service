@@ -1,8 +1,8 @@
 # ElevenLabs agent setup (Core: capture a request)
 
-Core clients until live booking (backlog D9) is built. In the database these clients are
-still `tier = run`; renaming to `core` is backlog D11. Base clients (no Jobber) need Base
-mode (D1) and don't use these tools.
+Core clients (`tier = core`) until live booking (backlog D9) is built. Base clients (no Jobber)
+need Base mode (D1) and don't use these tools. Create the client with `onboardClient.js`
+(README → Onboarding a client) and pass the agent's ID with `--agent-id`.
 
 One agent per Flowify client. All agents call the same Flowify URLs; the service works out
 which client a call is for from the dialled number, or from the agent ID in browser tests.
@@ -48,7 +48,7 @@ Those placeholders make a browser test behave like a call with no caller ID.
 | `caller_id_available` | yes / no |
 | `customer_name` | Tom Jones, Tom Jones from Apex Building, or `none` |
 | `customer_first_name` | Sam (empty for new callers) |
-| `tier` | run |
+| `tier` | core (or base) |
 | `can_book` | false |
 | `can_reschedule` | false |
 

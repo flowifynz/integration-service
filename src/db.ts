@@ -41,7 +41,7 @@ export interface ClientRow {
   id: string;
   slug: string;
   business_name: string;
-  tier: 'run' | 'receptionist';
+  tier: 'base' | 'core';
   status: 'onboarding' | 'active' | 'paused' | 'cancelled';
   agent_phone: string | null;
   owner_name: string | null;

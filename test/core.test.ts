@@ -476,3 +476,57 @@ describe('admin alerts in Google Chat', () => {
     assert.equal(url.searchParams.get('messageReplyOption'), 'REPLY_MESSAGE_FALLBACK_TO_NEW_THREAD');
   });
 });
+
+import { columnsToWrite, missingForNewClient, parseOnboardArgs, TIER_DEFAULTS } from '../src/onboarding/settings.ts';
+
+describe('onboarding script (D5)', () => {
+  const newCore = ['--slug', 'smith-plumbing', '--name', 'Smith Plumbing', '--tier', 'core', '--agent-phone', '09 555 1234', '--owner-mobile', '021 123 4567'];
+
+  it('parses a new Core client and normalises numbers to E.164', () => {
+    const { input, errors } = parseOnboardArgs(newCore);
+    assert.deepEqual(errors, []);
+    assert.equal(input?.agentPhone, '+6495551234');
+    assert.equal(input?.ownerMobile, '+64211234567');
+    assert.deepEqual(missingForNewClient(input!), []);
+  });
+
+  it('new client gets plan defaults, SubAccount = slug, onboarding in Test mode', () => {
+    const cols = columnsToWrite(parseOnboardArgs(newCore).input!, null);
+    assert.equal(cols.monthly_minutes_cap, TIER_DEFAULTS.core.minutesCap);
+    assert.equal(cols.sms_allowance_segments, 500);
+    assert.equal(cols.tnz_subaccount, 'smith-plumbing');
+    assert.equal(cols.status, 'onboarding');
+    assert.equal(cols.sms_mode, 'test');
+  });
+
+  it('rejects bad input with a clear message', () => {
+    const { input, errors } = parseOnboardArgs(['--slug', 'Smith Plumbing', '--tier', 'pro', '--owner-mobile', '12', '--agent-id', 'abc']);
+    assert.equal(input, undefined);
+    assert.ok(errors.some((e) => e.includes('--slug')));
+    assert.ok(errors.some((e) => e.includes('--tier must be base or core')));
+    assert.ok(errors.some((e) => e.includes('--owner-mobile')));
+    assert.ok(errors.some((e) => e.includes('--agent-id')));
+  });
+
+  it('a new client must have name, tier, Twilio number and owner mobile', () => {
+    const { input } = parseOnboardArgs(['--slug', 'x-plumbing']);
+    assert.match(missingForNewClient(input!)[0]!, /--name, --tier, --agent-phone, --owner-mobile/);
+  });
+
+  it('an update only changes what was given', () => {
+    const cols = columnsToWrite(parseOnboardArgs(['--slug', 'smith-plumbing', '--agent-id', 'agent_abc123']).input!, { tier: 'core' });
+    assert.deepEqual(cols, { elevenlabs_agent_id: 'agent_abc123' });
+  });
+
+  it('a Base to Core upgrade applies Core defaults unless overridden', () => {
+    const cols = columnsToWrite(parseOnboardArgs(['--slug', 's', '--tier', 'core', '--minutes', '400']).input!, { tier: 'base' });
+    assert.equal(cols.tier, 'core');
+    assert.equal(cols.monthly_minutes_cap, 400);
+    assert.equal(cols.sms_allowance_segments, TIER_DEFAULTS.core.smsAllowanceSegments);
+  });
+
+  it('--go-live switches the client on and texts to Live', () => {
+    const cols = columnsToWrite(parseOnboardArgs(['--slug', 's', '--go-live']).input!, { tier: 'core' });
+    assert.deepEqual(cols, { status: 'active', sms_mode: 'live' });
+  });
+});

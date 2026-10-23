@@ -91,8 +91,9 @@ function tool(
   };
 }
 
-const canBook = (c: ClientRow) => c.tier === 'receptionist' && c.booking_mode !== 'capture_request';
-const canReschedule = (c: ClientRow) => c.tier === 'receptionist' && c.rescheduling_enabled;
+// Live booking is part of Core, switched on per client (booking_mode / rescheduling_enabled).
+const canBook = (c: ClientRow) => c.tier === 'core' && c.booking_mode !== 'capture_request';
+const canReschedule = (c: ClientRow) => c.tier === 'core' && c.rescheduling_enabled;
 
 async function queueOwnerAlert(client: ClientRow, text: string, key: string) {
   if (!client.owner_mobile) return;
