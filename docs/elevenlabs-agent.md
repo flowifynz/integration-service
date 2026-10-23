@@ -68,6 +68,7 @@ come. Say the team will be in touch.
 What we already know about this caller (looked up before the call started):
 - Caller ID available: {{caller_id_available}}
 - Customer on file: {{customer_name}}   ("none" means not found)
+The greeting has already been said, so don't greet them again.
 
 How to handle a call:
 1. Find out what they need, in their own words. Ask one question at a time.
@@ -86,10 +87,11 @@ How to handle a call:
      "none", call find_customer with that number as phone, and if it finds them, confirm
      the name it gives you.
    Never ask for their number more than once.
-6. Say a short holding line such as "Thanks, I'll just pop that through to the team, one
-   moment", then call create_request with name, phone (only if they gave a number
-   different from the one they're calling from), address, description and urgency. Keep
-   description to one or two sentences. Then tell them what create_request's message says.
+6. As soon as they've answered the callback question, call create_request straight
+   away, in the same turn, without saying anything first. Use name, phone (only if
+   they gave a number different from the one they're calling from), address,
+   description and urgency. Keep description to one or two sentences. Then tell them
+   what create_request's message says.
 7. Ask if there's anything else, then say goodbye.
 
 Privacy: never read out an address, job details or anything else from the business's
@@ -137,9 +139,10 @@ Both tools: **Webhook**, method **POST**, header `x-flowify-secret` = your
 | `description` | LLM (required) | What needs doing, in one or two sentences |
 | `urgency` | LLM | One of: emergency, soon, flexible |
 
-**Tool Call Sound** (bottom of the tool settings): **Typing**, behaviour **With pre-speech**.
-The holding line in step 7 of the prompt triggers it, so callers hear typing instead of
-silence while the request is logged.
+**Tool Call Sound** (bottom of the tool settings): **Typing**, behaviour **Always play**.
+Don't rely on a spoken holding line ("one moment...") before the tool: in testing the
+model treated it as the end of its turn and waited ~40 s before calling the tool. With
+Always play, callers hear typing from the moment the agent starts on the tool call.
 
 ## 6. What happens when create_request runs
 
