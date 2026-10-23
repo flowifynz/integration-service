@@ -133,6 +133,36 @@ export function ownerAlertText(n: {
     .join('\n');
 }
 
+export type MessageAbout = 'supplier' | 'existing_customer' | 'other';
+
+export function normaliseAbout(v: unknown): MessageAbout {
+  const s = typeof v === 'string' ? v.trim().toLowerCase().replace(/[\s-]+/g, '_') : '';
+  if (s === 'supplier') return 'supplier';
+  if (s === 'existing_customer' || s === 'customer') return 'existing_customer';
+  return 'other';
+}
+
+/** Text to the business owner with a message (not a job). Plain GSM-7 in the fixed wording. */
+export function messageAlertText(n: {
+  callerName: string;
+  company: string | null;
+  callbackPhone: string | null;
+  phoneSource: PhoneSource;
+  about: MessageAbout;
+  message: string;
+}): string {
+  const label = n.about === 'supplier' ? 'Supplier message' : n.about === 'existing_customer' ? 'Customer message' : 'Message';
+  const m = n.message.length > 250 ? `${n.message.slice(0, 247)}...` : n.message;
+  return [
+    `${label} from ${n.callerName}${n.company ? `, ${n.company}` : ''}${n.callbackPhone ? ` (${n.callbackPhone})` : ' (NO callback number)'}`,
+    n.phoneSource === 'spoken_no_caller_id' ? 'Number said on the call, caller ID hidden: not verified.' : null,
+    m,
+    'Not a job - nothing added to Jobber.',
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
+
 /**
  * How the agent should refer to a Jobber client when confirming who's calling:
  * "Tom Jones", or "Tom Jones from Apex Building" for a company client with a contact name,

@@ -663,3 +663,48 @@ describe('post-call processing (D3)', () => {
     assert.doesNotMatch(base, /Jobber/);
   });
 });
+
+import { messageAlertText, normaliseAbout } from '../src/jobber/callerText.ts';
+
+describe('take_message (non-job calls)', () => {
+  it('owner message text is plain GSM-7 and says nothing went into Jobber', () => {
+    const t = messageAlertText({ callerName: 'Gareth Raisin', company: 'ABC Supplies', callbackPhone: '021 467 770', phoneSource: 'caller_id', about: 'supplier', message: 'Your order of copper pipe is ready to collect.' });
+    assert.match(t, /^Supplier message from Gareth Raisin, ABC Supplies \(021 467 770\)/);
+    assert.match(t, /nothing added to Jobber/);
+    assert.equal(smsSegments(t).encoding, 'GSM-7');
+  });
+
+  it('normalises who the message is from', () => {
+    assert.equal(normaliseAbout('Existing customer'), 'existing_customer');
+    assert.equal(normaliseAbout('supplier'), 'supplier');
+    assert.equal(normaliseAbout(undefined), 'other');
+  });
+
+  it('a call where only take_message ran is never a job, whatever the agent labelled it', () => {
+    const info = extractPostCall({
+      type: 'post_call_transcription',
+      data: {
+        conversation_id: 'c2',
+        transcript: [{ role: 'user', message: 'Message for Dave' }, { role: 'agent', tool_calls: [{ tool_name: 'take_message', params_as_json: '{}' }] }],
+        metadata: { call_duration_secs: 40 },
+        analysis: { data_collection_results: { call_category: { value: 'new_job' } } },
+      },
+    });
+    assert.equal(callCategory(info), 'other');
+    const plan = planPostCall(info, { tier: 'core', jobberRequestId: null, callerTextsOn: true });
+    assert.deepEqual([plan.createRequest, plan.ownerText, plan.callerText], [false, null, false]);
+  });
+
+  it('a sales call that slipped into create_request gets no thank-you text when labelled', () => {
+    const info = extractPostCall({
+      type: 'post_call_transcription',
+      data: {
+        conversation_id: 'c3',
+        transcript: [{ role: 'user', message: 'We build websites' }, { role: 'agent', tool_calls: [{ tool_name: 'create_request', params_as_json: '{"name":"Gareth"}' }] }],
+        metadata: { call_duration_secs: 120 },
+        analysis: { data_collection_results: { call_category: { value: 'sales_spam' } } },
+      },
+    });
+    assert.equal(planPostCall(info, { tier: 'core', jobberRequestId: 'r1', callerTextsOn: true }).callerText, false);
+  });
+});

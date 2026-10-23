@@ -31,6 +31,8 @@ export interface PostCallInfo {
   /** analysis.data_collection_results flattened to { field: value }. */
   collected: Record<string, string | number | boolean | null>;
   requestTool: RequestToolCall;
+  /** Names of every tool the agent called (create_request, take_message, find_customer, ...). */
+  toolsCalled: string[];
   /** The caller said something (any non-empty user turn). */
   userSpoke: boolean;
 }
@@ -68,12 +70,14 @@ export function extractPostCall(payload: unknown): PostCallInfo {
 
   // create_request calls and our responses, from the transcript.
   const requestTool: RequestToolCall = { called: false, args: null, logged: null };
+  const toolsCalled = new Set<string>();
   let userSpoke = false;
   for (const turn of Array.isArray(data.transcript) ? data.transcript : []) {
     const t = obj(turn);
     if (t.role === 'user' && text(t.message)) userSpoke = true;
     for (const call of Array.isArray(t.tool_calls) ? t.tool_calls : []) {
       const c = obj(call);
+      if (typeof c.tool_name === 'string') toolsCalled.add(c.tool_name);
       if (c.tool_name !== 'create_request') continue;
       requestTool.called = true;
       const args = parseJson(c.params_as_json) ?? obj(c.params);
@@ -107,6 +111,7 @@ export function extractPostCall(payload: unknown): PostCallInfo {
     summary: text(analysis.transcript_summary),
     collected,
     requestTool,
+    toolsCalled: [...toolsCalled],
     userSpoke,
   };
 }
@@ -146,6 +151,10 @@ export function callerDetails(info: PostCallInfo): CallerDetails {
 export const MIN_REAL_CALL_SECS = 10;
 
 export function callCategory(info: PostCallInfo): CallCategory {
+  // A message was taken and no job logged: never treat it as a job (no after-call request).
+  if (info.toolsCalled.includes('take_message') && !info.requestTool.called) return 'other';
+  // The agent's own classification next, so a sales call that slipped into create_request
+  // still gets no thank-you text.
   const declared = text(info.collected.call_category)?.toLowerCase();
   if (declared) return declared === 'new_job' ? 'new_job' : 'other';
   if (info.requestTool.called) return 'new_job';

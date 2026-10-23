@@ -11,7 +11,8 @@ service stores the call, and the worker then does the following:
 | New job, Core, `create_request` never ran | Request created now from the agent's data collection; owner gets the full summary; caller thanked |
 | New job but no name or details | No request; owner gets what there is; call flagged `needs_review` |
 | New job, Base | Owner gets the summary text (T2, or T3 if urgent); caller thanked. No Jobber |
-| Sales, supplier, wrong number (`call_category` other than `new_job`) | Recorded only |
+| Message taken with `take_message` (supplier, customer chasing something) | Owner texted during the call by the tool; nothing in Jobber; no caller text. Recorded as `other` |
+| Sales, wrong number (`call_category` other than `new_job`) | Recorded only. The agent turns salespeople away without taking details |
 | Nobody spoke, or under 10 seconds | Recorded as `no_conversation` (missed-call text-back is D2) |
 | Can't tell (no `call_category`, tool not used) | Recorded, flagged `needs_review` |
 
@@ -60,7 +61,8 @@ node dist/scripts/calls.js flowify-test         # latest calls and what happened
 2. **Safety net.** Turn the `create_request` tool off on the agent (or disconnect it), publish,
    and call with a job. Within a minute: a request appears in Jobber with "Logged by Flowify
    after the call", you get the owner text, `request` = after_call. Turn the tool back on and publish.
-3. **Sales call.** Pretend to sell something. You should get no texts, and `category` = other.
+3. **Sales call.** Pretend to sell something. The agent should say no politely and end the call: no texts, nothing in Jobber, `category` = other.
+3b. **Message.** Pretend to be a supplier with a message for the owner. You get a "Supplier message" text; nothing in Jobber; `category` = other, `outcome` = message_taken.
 4. **Replay.** `node dist/scripts/calls.js --reprocess <conversation_id>` on test 1 sends nothing new.
 
 Worker log lines start `[call <conversation_id>]` and list what was done.

@@ -3,6 +3,7 @@
 // Tool calls (mid-call):
 //   POST /elevenlabs/tools/find_customer           built (step 2)
 //   POST /elevenlabs/tools/create_request          built (step 2)
+//   POST /elevenlabs/tools/take_message            built (D3): non-job message to the owner
 //   POST /elevenlabs/tools/get_availability        stub (step 5)
 //   POST /elevenlabs/tools/book_appointment        stub (step 5)
 //   POST /elevenlabs/tools/find_upcoming_bookings  stub (step 6)
@@ -28,7 +29,7 @@ import { verifyElevenLabsSignature } from '../elevenlabsSignature.ts';
 import { Sentry } from '../instrument.ts';
 import { logJobberRequest, resolveClient } from '../calls/logRequest.ts';
 import { extractPostCall } from '../calls/postCall.ts';
-import { confirmName, looksMadeUp, normaliseUrgency, type PhoneSource, ownerAlertText } from '../jobber/callerText.ts';
+import { confirmName, looksMadeUp, messageAlertText, normaliseAbout, normaliseUrgency, type PhoneSource, ownerAlertText } from '../jobber/callerText.ts';
 import { findClientsByPhone, pickClient } from '../jobber/clients.ts';
 import { formatNational, toE164 } from '../phone.ts';
 import { getBoss, Queues } from '../queue.ts';
@@ -214,6 +215,81 @@ export async function elevenLabsToolRoutes(app: FastifyInstance) {
         message: `Done. Tell the caller their request has been passed to the ${client.business_name} team${
           urgency === 'emergency' ? ', flagged as urgent,' : ''
         } and someone will be in touch${callbackDisplay ? ` on ${callbackDisplay}` : ' as soon as they can'}.`,
+      });
+    }),
+  );
+
+  // ---- take_message ---------------------------------------------------------------
+  // Body: { called_number, agent_id, caller_number, conversation_id, name, company?, phone?,
+  //         message, about }   about: supplier | existing_customer | other
+  // For callers who aren't booking a job (suppliers, a customer chasing something, anyone
+  // else wanting the owner): texts the owner. Nothing goes into Jobber, no caller text.
+  // Works for Base and Core. Salespeople are turned away by the prompt, not logged.
+  app.post(
+    '/tools/take_message',
+    tool(async ({ req, reply, body, client }) => {
+      const name = str(body.name);
+      const message = str(body.message);
+      if (!name || !message) {
+        return reply.send({
+          ok: false,
+          error: 'missing_details',
+          message: `Before passing this on, ask for ${[!name && 'their name', !message && 'the message'].filter(Boolean).join(' and ')}.`,
+        });
+      }
+      const callerId = toE164(str(body.caller_number));
+      const phoneArg = str(body.phone);
+      const spokenPhone = toE164(phoneArg);
+      if (!callerId && phoneArg?.toLowerCase() !== 'none' && !spokenPhone) {
+        return reply.send({
+          ok: false,
+          error: 'need_number',
+          message: "There's no caller ID. Ask them to say their phone number, digit by digit. If they won't give one, call take_message again with phone set to none.",
+        });
+      }
+      if (spokenPhone && looksMadeUp(formatNational(spokenPhone))) {
+        return reply.send({
+          ok: false,
+          error: 'check_number',
+          message: "That number doesn't look right. Ask them to say it again, digit by digit, and use only the digits they actually say.",
+        });
+      }
+      const callbackPhone = spokenPhone ?? callerId;
+      const callbackDisplay = callbackPhone ? formatNational(callbackPhone) : null;
+      const phoneSource: PhoneSource = spokenPhone ? (callerId ? 'spoken' : 'spoken_no_caller_id') : callerId ? 'caller_id' : 'none';
+      const conversationId = str(body.conversation_id);
+
+      const text = messageAlertText({
+        callerName: name,
+        company: str(body.company),
+        callbackPhone: callbackDisplay,
+        phoneSource,
+        about: normaliseAbout(body.about),
+        message,
+      });
+      let sent = false;
+      if (client.owner_mobile) {
+        await queueOwnerAlert(client, text, `${client.id}:${conversationId ?? Date.now()}:message`)
+          .then(() => (sent = true))
+          .catch((err) => req.log.error({ err }, 'message queue failed'));
+      }
+      if (conversationId) {
+        await db()
+          .query(
+            `INSERT INTO calls (conversation_id, client_id, caller_phone, outcome)
+             VALUES ($1, $2, $3, 'message_taken')
+             ON CONFLICT (conversation_id) DO UPDATE
+               SET client_id = EXCLUDED.client_id,
+                   outcome = CASE WHEN calls.jobber_request_id IS NOT NULL THEN calls.outcome ELSE EXCLUDED.outcome END`,
+            [conversationId, client.id, callerId],
+          )
+          .catch((err) => req.log.error({ err }, 'calls upsert failed'));
+      }
+      return reply.send({
+        ok: true,
+        message: sent
+          ? `Done. Tell them you've passed the message on and someone from ${client.business_name} will get back to them if needed.`
+          : `Tell them you've noted the message for the ${client.business_name} team.`,
       });
     }),
   );
