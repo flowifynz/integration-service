@@ -1,4 +1,8 @@
-# ElevenLabs agent setup (Run tier: capture a request)
+# ElevenLabs agent setup (Core: capture a request)
+
+Core clients until live booking (backlog D9) is built. In the database these clients are
+still `tier = run`; renaming to `core` is backlog D11. Base clients (no Jobber) need Base
+mode (D1) and don't use these tools.
 
 One agent per Flowify client. All agents call the same Flowify URLs; the service works out
 which client a call is for from the dialled number, or from the agent ID in browser tests.

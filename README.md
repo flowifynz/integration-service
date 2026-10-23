@@ -1,8 +1,20 @@
 # Flowify service
 
-One Node.js (TypeScript) app on Render that serves every Flowify client on the Run and
-Receptionist tiers. It connects **ElevenLabs** (the AI receptionist), **Jobber** (the
-client's job management, which they own) and **TNZ** (NZ SMS).
+One Node.js (TypeScript) app on Render that serves every Flowify client. It connects
+**ElevenLabs** (the AI receptionist), **Jobber** (the client's job management, which they
+own) and **TNZ** (NZ SMS).
+
+## Plans (from 23 Oct 2026)
+
+| Plan | What the service does | Price |
+|---|---|---|
+| **Base** | AI receptionist + missed-call text-back. No Jobber. Needs *Base mode* (backlog D1–D3), not built yet | $495 setup, $149/mo |
+| **Core** | Base + Jobber: requests from calls, Jobber-driven texts, live booking once built (D9) | from $1,495 setup, $450/mo |
+
+The database still uses the old tier values: `run` (= Core, capture only) and `receptionist`
+(= Core with booking tools). Renaming them to `base` / `core` is backlog item D11 (a migration
+plus the `tier` / `can_book` call-start variables), so keep using `run` for now.
+The full backlog (D1–D12) lives in Notion: Flowify Builds › Flowify Service Build Backlog.
 
 ```
  Caller ──► Twilio ──► ElevenLabs agent ──tool calls──►┐
@@ -30,8 +42,11 @@ client's job management, which they own) and **TNZ** (NZ SMS).
 | TNZ sender + messages log, dedupe, opt-outs, quiet hours | Done — payload shape unconfirmed |
 | STOP handling (TNZ inbound) | Done — payload shape unconfirmed |
 | ElevenLabs find_customer, create_request, call-start greeting | Done (step 2), see docs/elevenlabs-agent.md |
-| ElevenLabs booking/reschedule tools, post-call summary | Stubs |
+| ElevenLabs booking/reschedule tools, post-call summary | Stubs (backlog D9, D3) |
 | Worker: Jobber-driven texts (confirmations, reminders, quote/invoice follow-ups, reviews) | Done (step 4), see docs/jobber-texts.md |
+| TNZ cost tracking + monthly usage report (`sms:usage`) | Done |
+| Base mode, missed-call text-back | Not built (D1, D2) |
+| Go-live readiness: alerts to Jaron, onboarding script, minutes cap, weekly calls-vs-Jobber check | Not built (D4, D5, D6, D7) |
 
 ## Layout
 
@@ -95,13 +110,15 @@ see **SETUP.md**.
   when booking is built. Keep them minimal, since reviewers check.
 - **Test in GraphiQL invalidates the app's refresh tokens for that account.** Reconnect afterwards.
 
-## Onboarding a client (until the step 7 script exists)
+## Onboarding a client (until the onboarding script, D5, exists)
+
+Core client today: `tier` = `'run'`, `monthly_minutes_cap` = 300 (100 for Base once Base mode exists).
 
 ```sql
 INSERT INTO clients (slug, business_name, tier, agent_phone, owner_mobile, owner_email,
                      tnz_subaccount, monthly_minutes_cap)
 VALUES ('smith-plumbing', 'Smith Plumbing', 'run', '+6495551234', '+64211234567',
-        'owner@example.co.nz', 'smith-plumbing', 100);
+        'owner@example.co.nz', 'smith-plumbing', 300);
 ```
 
 ```bash
@@ -133,7 +150,7 @@ Marked in code with comments. None of these are verified yet:
 
 ## Decisions taken in this scaffold
 
-- Added a sixth tool, `create_request`, for Run tier (the five-tool list has no way to log
+- Added a sixth tool, `create_request`, for Core (old "Run" tier) (the five-tool list has no way to log
   a request mid-call). Alternative: create it from the post-call webhook.
 - Opt-outs with no client attached block that number for every client (shared short code).
 - Owner alerts skip quiet hours; customer texts don't.
