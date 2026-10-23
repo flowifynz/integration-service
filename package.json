@@ -22,6 +22,7 @@
     "sql": "node src/scripts/sql.ts",
     "sms:test": "node src/scripts/sendTestSms.ts",
     "sms:usage": "node src/scripts/smsUsage.ts",
+    "jobber:tomorrow": "node src/scripts/tomorrowVisits.ts",
     "test": "node --test test/*.test.ts"
   },
   "dependencies": {

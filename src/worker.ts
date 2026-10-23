@@ -1,7 +1,8 @@
 // Background worker entry point (Render "flowify-worker").
-// Processes queued jobs: texts, Jobber webhook follow-ups, nightly reminders.
+// Processes queued jobs: texts, Jobber webhook events, follow-up checks, nightly reminders.
 
 import { Sentry } from './instrument.ts';
+import { type FollowUpCheck, handleJobberEvent, runCheck, runDayBeforeReminders } from './automation/run.ts';
 import { closeDb, db } from './db.ts';
 import { getBoss, Queues, stopBoss } from './queue.ts';
 import { sendClientSms, type SendSmsJob } from './sms/outbound.ts';
@@ -21,12 +22,10 @@ await boss.work<SendSmsJob>(Queues.SEND_SMS, async ([job]) => {
 });
 
 // ---- jobber-event -----------------------------------------------------------------
-// One stored webhook_events row. Build step 4: fetch the visit/quote/invoice from Jobber
-// (jobberQuery with a 15s timeout) and queue the right text via Queues.SEND_SMS with
-// idempotencyKey(clientId, itemId, kind).
+// One stored webhook_events row → schedule whatever follow-up check it implies.
 await boss.work<{ eventId: string }>(Queues.JOBBER_EVENT, async ([job]) => {
   if (!job) return;
-  const { rows } = await db().query<{ id: string; client_id: string; topic: string; item_id: string; status: string }>(
+  const { rows } = await db().query<{ id: string; client_id: string; topic: string; item_id: string | null; status: string }>(
     'SELECT id, client_id, topic, item_id, status FROM webhook_events WHERE id = $1',
     [job.data.eventId],
   );
@@ -34,33 +33,26 @@ await boss.work<{ eventId: string }>(Queues.JOBBER_EVENT, async ([job]) => {
   if (!evt || evt.status !== 'received') return;
 
   try {
-    switch (evt.topic) {
-      // TODO(step 4): confirm the real topic names in Jobber's Developer Center first.
-      // case 'VISIT_CREATE':
-      // case 'VISIT_UPDATE':
-      // case 'QUOTE_SENT':
-      // case 'INVOICE_CREATE':
-      default:
-        await db().query(`UPDATE webhook_events SET status = 'ignored', processed_at = now() WHERE id = $1`, [evt.id]);
-        return;
-    }
+    const outcome = await handleJobberEvent(evt);
+    await db().query(`UPDATE webhook_events SET status = $2, processed_at = now(), error = NULL WHERE id = $1`, [evt.id, outcome]);
   } catch (err) {
     await db().query(`UPDATE webhook_events SET error = $2 WHERE id = $1`, [evt.id, (err as Error).message]);
-    throw err; // retry
+    throw err; // pg-boss retries with backoff
   }
 });
 
+// ---- follow-up-check ----------------------------------------------------------------
+// Re-fetch the Jobber item and text only if it still makes sense.
+await boss.work<FollowUpCheck>(Queues.FOLLOW_UP_CHECK, async ([job]) => {
+  if (!job) return;
+  const outcome = await runCheck(job.data);
+  console.log(`[check ${job.data.check} ${job.data.itemId}] ${outcome}`);
+});
+
 // ---- day-before-reminders ---------------------------------------------------------
-// Build step 4: for each active client with a live Jobber connection, query tomorrow's
-// visits (NZ date), and queue one visit_reminder per visit with
-// idempotencyKey(clientId, visitId, 'visit_reminder').
 await boss.work<{ date: string }>(Queues.DAY_BEFORE_REMINDERS, async ([job]) => {
   if (!job) return;
-  const { rows } = await db().query<{ id: string }>(
-    `SELECT c.id FROM clients c JOIN jobber_connections j ON j.client_id = c.id
-      WHERE c.status = 'active' AND j.status = 'connected'`,
-  );
-  console.log(`Reminders for ${job.data.date}: ${rows.length} clients (not implemented yet)`);
+  await runDayBeforeReminders(job.data.date);
 });
 
 console.log('Worker started');

@@ -31,7 +31,7 @@ client's job management, which they own) and **TNZ** (NZ SMS).
 | STOP handling (TNZ inbound) | Done — payload shape unconfirmed |
 | ElevenLabs find_customer, create_request, call-start greeting | Done (step 2), see docs/elevenlabs-agent.md |
 | ElevenLabs booking/reschedule tools, post-call summary | Stubs |
-| Worker: Jobber event → text, nightly reminders | Stubs |
+| Worker: Jobber-driven texts (confirmations, reminders, quote/invoice follow-ups, reviews) | Done (step 4), see docs/jobber-texts.md |
 
 ## Layout
 

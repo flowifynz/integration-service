@@ -62,6 +62,7 @@ export interface ClientRow {
   elevenlabs_agent_id: string | null;
   sms_allowance_segments: number | null;
   sms_overage_cents: string | null; // numeric comes back from pg as a string
+  automation: unknown; // jsonb; read via automationSettings()
 }
 
 export async function getClientById(id: string): Promise<ClientRow | null> {

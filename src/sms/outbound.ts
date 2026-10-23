@@ -18,6 +18,10 @@ export interface SendSmsJob {
   text: string;
   /** '<clientId>:<jobber item id>:<kind>' — same key = same text, sent at most once. */
   idempotencyKey: string;
+  /** The Jobber visit/quote/invoice/job this text is about (for "already confirmed?" checks). */
+  jobberItemId?: string;
+  /** Version of that item, e.g. a visit's startAt, so a moved visit is recognised. */
+  itemRef?: string;
 }
 
 export type SendSmsResult =
@@ -44,11 +48,11 @@ export async function sendClientSms(job: SendSmsJob): Promise<SendSmsResult> {
 
   // 1. Record the message (or find the existing record for this idempotency key).
   const inserted = await db().query<{ id: string; status: string }>(
-    `INSERT INTO messages (client_id, idempotency_key, kind, is_marketing, to_phone, body, department)
-     VALUES ($1, $2, $3, $4, $5, $6, $7)
+    `INSERT INTO messages (client_id, idempotency_key, kind, is_marketing, to_phone, body, department, jobber_item_id, item_ref)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
      ON CONFLICT (idempotency_key) DO NOTHING
      RETURNING id, status`,
-    [client.id, job.idempotencyKey, job.kind, MARKETING_KINDS.has(job.kind), to ?? job.toPhone, body, departmentFor(job.kind)],
+    [client.id, job.idempotencyKey, job.kind, MARKETING_KINDS.has(job.kind), to ?? job.toPhone, body, departmentFor(job.kind), job.jobberItemId ?? null, job.itemRef ?? null],
   );
   const row =
     inserted.rows[0] ??

@@ -9,6 +9,8 @@ export const Queues = {
   SEND_SMS: 'send-sms',
   /** Process one stored Jobber webhook event (see worker.ts). */
   JOBBER_EVENT: 'jobber-event',
+  /** Delayed re-check of a Jobber item before texting (see automation/run.ts). */
+  FOLLOW_UP_CHECK: 'follow-up-check',
   /** Nightly: text every client's customers about tomorrow's visits. */
   DAY_BEFORE_REMINDERS: 'day-before-reminders',
 } as const;

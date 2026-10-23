@@ -293,3 +293,102 @@ describe('looksMadeUp (invented phone numbers)', () => {
     assert.equal(looksMadeUp('022 418 3390'), false);
   });
 });
+
+// ---- Build step 4: Jobber-driven texts ------------------------------------------------
+import { automationSettings, DEFAULT_AUTOMATION } from '../src/automation/settings.ts';
+import {
+  bookingConfirmationText,
+  followUpTimes,
+  hiName,
+  invoiceFollowUpText,
+  pickMobile,
+  quoteFollowUpText,
+  reminderText,
+  reviewRequestText,
+  visitConfirmationDecision,
+  visitWhen,
+  zonedMidnightIso,
+} from '../src/automation/texts.ts';
+
+describe('automation settings', () => {
+  it('merges valid overrides over defaults and ignores junk', () => {
+    assert.deepEqual(automationSettings({}), DEFAULT_AUTOMATION);
+    const s = automationSettings({ quoteFollowUpDays: 5, reviewRequests: false, invoiceFollowUpDays: [2], reminders: 'yes', confirmWithinDays: -1 });
+    assert.equal(s.quoteFollowUpDays, 5);
+    assert.equal(s.reviewRequests, false);
+    assert.deepEqual(s.invoiceFollowUpDays, [2]);
+    assert.equal(s.reminders, true); // 'yes' ignored
+    assert.equal(s.confirmWithinDays, 60); // negative ignored
+    assert.deepEqual(automationSettings(null), DEFAULT_AUTOMATION);
+  });
+});
+
+describe('visit times (Pacific/Auckland)', () => {
+  const tz = 'Pacific/Auckland';
+  it('formats day and time windows in NZ time with a plain hyphen', () => {
+    // 2026-10-29T19:00Z = Fri 30 Oct 8am NZDT
+    assert.equal(visitWhen('2026-10-29T19:00:00Z', '2026-10-29T21:30:00Z', false, tz), 'Fri 30 Oct, 8am-10:30am');
+    assert.equal(visitWhen('2026-10-29T19:00:00Z', null, false, tz), 'Fri 30 Oct, 8am');
+    assert.equal(visitWhen('2026-10-29T19:00:00Z', '2026-10-30T04:00:00Z', true, tz), 'Fri 30 Oct');
+    assert.equal(visitWhen('2026-10-30T00:00:00Z', '2026-10-30T01:00:00Z', false, tz), 'Fri 30 Oct, 1pm-2pm');
+  });
+  it('finds NZ midnight in summer, winter and across DST', () => {
+    assert.equal(zonedMidnightIso('2026-10-24', tz), '2026-10-23T11:00:00.000Z'); // NZDT +13
+    assert.equal(zonedMidnightIso('2026-07-01', tz), '2026-06-30T12:00:00.000Z'); // NZST +12
+    assert.equal(zonedMidnightIso('2026-09-27', tz), '2026-09-26T12:00:00.000Z'); // DST starts 2am that day
+  });
+});
+
+describe('visit confirmation decisions', () => {
+  const now = new Date('2026-10-23T03:00:00Z');
+  const v = { startAt: '2026-10-29T19:00:00Z', isComplete: false, isRecurring: false };
+  it('confirms a new upcoming visit once, then treats a new time as a reschedule', () => {
+    assert.deepEqual(visitConfirmationDecision(v, [], now, 60), { send: true, kind: 'booking_confirmation' });
+    assert.equal(visitConfirmationDecision(v, [v.startAt], now, 60).send, false);
+    assert.deepEqual(visitConfirmationDecision({ ...v, startAt: '2026-10-30T19:00:00Z' }, [v.startAt], now, 60), { send: true, kind: 'reschedule_confirmation' });
+  });
+  it('skips unscheduled, past, complete, recurring and far-off visits', () => {
+    assert.equal(visitConfirmationDecision({ ...v, startAt: null }, [], now, 60).send, false);
+    assert.equal(visitConfirmationDecision({ ...v, startAt: '2026-10-22T19:00:00Z' }, [], now, 60).send, false);
+    assert.equal(visitConfirmationDecision({ ...v, isComplete: true }, [], now, 60).send, false);
+    assert.equal(visitConfirmationDecision({ ...v, isRecurring: true }, [], now, 60).send, false);
+    assert.equal(visitConfirmationDecision({ ...v, startAt: '2027-03-01T19:00:00Z' }, [], now, 60).send, false);
+  });
+});
+
+describe('follow-up timing', () => {
+  const DAY = 24 * 3600 * 1000;
+  const now = new Date('2026-10-23T03:00:00Z');
+  it('keeps future and recent offsets, drops stale ones', () => {
+    const due = new Date('2026-10-01T00:00:00Z'); // 22 days ago
+    assert.equal(followUpTimes(due, [1 * DAY, 7 * DAY], now, 3).length, 0);
+    const due2 = new Date('2026-10-20T00:00:00Z'); // 3 days ago
+    assert.deepEqual(followUpTimes(due2, [1 * DAY, 7 * DAY], now, 3).map((t) => t.offsetMs / DAY), [1, 7]);
+  });
+});
+
+describe('customer mobile + wording', () => {
+  const asMobile = (raw: string) => (raw.startsWith('02') ? `+64${raw.slice(1).replace(/\D/g, '')}` : null);
+  it('prefers the primary mobile, skips landlines', () => {
+    assert.equal(pickMobile([{ number: '09 555 1234', primary: true }, { number: '021 467 770', primary: false }], asMobile), '+6421467770');
+    assert.equal(pickMobile([{ number: '021 111 222' }, { number: '022 333 444', primary: true }], asMobile), '+6422333444');
+    assert.equal(pickMobile([{ number: '09 555 1234' }], asMobile), null);
+    assert.equal(pickMobile(null, asMobile), null);
+  });
+  it('writes short, plain-ASCII texts', () => {
+    const p = { firstName: 'Sam' };
+    const texts = [
+      bookingConfirmationText(p, 'Smith Plumbing', 'Fri 30 Oct, 8am-10:30am', '12 Smith Street'),
+      reminderText(p, 'Smith Plumbing', 'Fri 30 Oct, 8am-10:30am', '12 Smith Street'),
+      quoteFollowUpText(p, 'Smith Plumbing', '45', 'https://clienthub.getjobber.com/client_hubs/abc/quotes/123'),
+      invoiceFollowUpText(p, 'Smith Plumbing', '1021', 'on Mon 26 Oct', 'https://clienthub.getjobber.com/client_hubs/abc/invoices/456'),
+      reviewRequestText(p, 'Smith Plumbing', 'https://g.page/r/abc123/review'),
+    ];
+    for (const t of texts) {
+      assert.equal(smsSegments(t).encoding, 'GSM-7', t);
+      assert.ok(smsSegments(t).segments <= 2, t);
+    }
+    assert.equal(hiName({ firstName: '' }), 'Hi there');
+    assert.match(texts[0]!, /^Hi Sam, you're booked in with Smith Plumbing for Fri 30 Oct, 8am-10:30am at 12 Smith Street\.$/);
+  });
+});
