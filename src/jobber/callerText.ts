@@ -42,9 +42,47 @@ export function requestTitle(description: string | null | undefined, urgency: Ur
   return urgency === 'emergency' ? `URGENT: ${short}` : short;
 }
 
+/** Where the callback number came from. 'spoken' with no caller ID can't be verified. */
+export type PhoneSource = 'caller_id' | 'spoken' | 'spoken_no_caller_id' | 'none';
+
+export function phoneSourceLabel(src: PhoneSource): string {
+  switch (src) {
+    case 'caller_id':
+      return 'from caller ID';
+    case 'spoken':
+      return 'given on the call';
+    case 'spoken_no_caller_id':
+      return 'given on the call, caller ID hidden, not verified';
+    case 'none':
+      return 'no number given';
+  }
+}
+
+/**
+ * True for numbers a model is likely to invent as a placeholder: a run of 6+ ascending or
+ * descending digits (022 123 4567) or 6+ of the same digit (021 000 0000). Real numbers
+ * like this exist but are rare enough that asking the caller to repeat it is the right call.
+ */
+export function looksMadeUp(nationalDigits: string): boolean {
+  const d = nationalDigits.replace(/\D/g, '');
+  let up = 1;
+  let down = 1;
+  let same = 1;
+  for (let i = 1; i < d.length; i++) {
+    const a = Number(d[i - 1]);
+    const b = Number(d[i]);
+    up = b === a + 1 ? up + 1 : 1;
+    down = b === a - 1 ? down + 1 : 1;
+    same = b === a ? same + 1 : 1;
+    if (up >= 6 || down >= 6 || same >= 6) return true;
+  }
+  return false;
+}
+
 export interface RequestNoteInput {
   callerName: string;
   callbackPhone: string | null;
+  phoneSource: PhoneSource;
   address: string | null;
   description: string;
   urgency: Urgency;
@@ -56,7 +94,7 @@ export function requestNote(n: RequestNoteInput): string {
   return [
     'Logged by the Flowify AI receptionist.',
     `Caller: ${n.callerName}`,
-    n.callbackPhone ? `Callback: ${n.callbackPhone}` : null,
+    n.callbackPhone ? `Callback: ${n.callbackPhone} (${phoneSourceLabel(n.phoneSource)})` : 'Callback: no number given',
     n.address ? `Site: ${n.address}${n.addressOnFile ? '' : ' (not yet a property on this client — please add)'}` : 'Site: not given',
     `Urgency: ${n.urgency}`,
     '',
@@ -70,6 +108,7 @@ export function requestNote(n: RequestNoteInput): string {
 export function ownerAlertText(n: {
   callerName: string;
   callbackPhone: string | null;
+  phoneSource: PhoneSource;
   address: string | null;
   description: string;
   urgency: Urgency;
@@ -78,7 +117,8 @@ export function ownerAlertText(n: {
   const head = n.urgency === 'emergency' ? 'URGENT new request' : 'New request';
   const d = n.description.length > 200 ? `${n.description.slice(0, 197)}…` : n.description;
   return [
-    `${head} from ${n.callerName}${n.callbackPhone ? ` (${n.callbackPhone})` : ''}`,
+    `${head} from ${n.callerName}${n.callbackPhone ? ` (${n.callbackPhone})` : ' (NO callback number)'}`,
+    n.phoneSource === 'spoken_no_caller_id' ? 'Number said on the call, caller ID hidden: not verified.' : null,
     n.address ? `Site: ${n.address}` : null,
     d,
     n.loggedInJobber ? 'In Jobber under Requests.' : 'NOT saved in Jobber (connection problem) — please add it manually.',

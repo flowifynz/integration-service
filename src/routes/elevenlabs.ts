@@ -26,7 +26,7 @@ import { safeEqual } from '../crypto.ts';
 import { type ClientRow, db } from '../db.ts';
 import { verifyElevenLabsSignature } from '../elevenlabsSignature.ts';
 import { Sentry } from '../instrument.ts';
-import { addressMatches, confirmName, normaliseUrgency, ownerAlertText, requestNote, requestTitle, splitName } from '../jobber/callerText.ts';
+import { addressMatches, confirmName, looksMadeUp, normaliseUrgency, type PhoneSource, ownerAlertText, requestNote, requestTitle, splitName } from '../jobber/callerText.ts';
 import { createJobberClient, createJobberRequest, findClientsByPhone, findPropertyId, pickClient } from '../jobber/clients.ts';
 import { formatNational, toE164 } from '../phone.ts';
 import { getBoss, Queues } from '../queue.ts';
@@ -167,10 +167,33 @@ export async function elevenLabsToolRoutes(app: FastifyInstance) {
       const address = str(body.address);
       const urgency = normaliseUrgency(body.urgency);
       const callerId = toE164(str(body.caller_number));
-      const spokenPhone = toE164(str(body.phone));
+      const phoneArg = str(body.phone);
+      const spokenPhone = toE164(phoneArg);
+
+      // No caller ID: the only number we have is one the caller said, so make sure we got one
+      // and that it isn't something the model invented ("the one I'm calling from" → 022 123 4567).
+      if (!callerId) {
+        if (phoneArg?.toLowerCase() !== 'none' && !spokenPhone) {
+          return reply.send({
+            ok: false,
+            error: 'need_number',
+            message:
+              "There's no caller ID, so you can't see the number they're calling from. Ask them to say their phone number, digit by digit. If they won't give one, call create_request again with phone set to none.",
+          });
+        }
+      }
+      if (spokenPhone && looksMadeUp(formatNational(spokenPhone))) {
+        return reply.send({
+          ok: false,
+          error: 'check_number',
+          message: "That number doesn't look right. Ask the caller to say their phone number again, digit by digit, and use only the digits they actually say.",
+        });
+      }
+
       const matchPhone = callerId ?? spokenPhone; // who they are
       const callbackPhone = spokenPhone ?? callerId; // where to call back
       const callbackDisplay = callbackPhone ? formatNational(callbackPhone) : null;
+      const phoneSource: PhoneSource = spokenPhone ? (callerId ? 'spoken' : 'spoken_no_caller_id') : callerId ? 'caller_id' : 'none';
       const conversationId = str(body.conversation_id);
 
       let requestId: string | null = null;
@@ -194,6 +217,7 @@ export async function elevenLabsToolRoutes(app: FastifyInstance) {
           note: requestNote({
             callerName: name,
             callbackPhone: callbackDisplay,
+            phoneSource,
             address,
             description,
             urgency,
@@ -208,7 +232,7 @@ export async function elevenLabsToolRoutes(app: FastifyInstance) {
 
       await queueOwnerAlert(
         client,
-        ownerAlertText({ callerName: name, callbackPhone: callbackDisplay, address, description, urgency, loggedInJobber: Boolean(requestId) }),
+        ownerAlertText({ callerName: name, callbackPhone: callbackDisplay, phoneSource, address, description, urgency, loggedInJobber: Boolean(requestId) }),
         `${client.id}:${requestId ?? conversationId ?? Date.now()}:owner_alert`,
       ).catch((err) => req.log.error({ err }, 'owner alert queue failed'));
 
@@ -229,7 +253,7 @@ export async function elevenLabsToolRoutes(app: FastifyInstance) {
         logged: Boolean(requestId),
         message: `Done. Tell the caller their request has been passed to the ${client.business_name} team${
           urgency === 'emergency' ? ', flagged as urgent,' : ''
-        } and someone will be in touch${callbackDisplay ? ` on ${callbackDisplay}` : ''}.`,
+        } and someone will be in touch${callbackDisplay ? ` on ${callbackDisplay}` : ' as soon as they can'}.`,
       });
     }),
   );

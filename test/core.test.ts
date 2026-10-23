@@ -5,7 +5,7 @@ import { createHmac, randomBytes } from 'node:crypto';
 import { describe, it } from 'node:test';
 import { decrypt, encrypt, safeEqual, signToken, verifyToken } from '../src/crypto.ts';
 import { verifyElevenLabsSignature } from '../src/elevenlabsSignature.ts';
-import { addressMatches, confirmName, normaliseUrgency, ownerAlertText, requestNote, requestTitle, splitName } from '../src/jobber/callerText.ts';
+import { addressMatches, confirmName, looksMadeUp, normaliseUrgency, ownerAlertText, requestNote, requestTitle, splitName } from '../src/jobber/callerText.ts';
 import { accessTokenExpiry } from '../src/jobber/oauth.ts';
 import { parseJobberWebhook, verifyJobberSignature, webhookDedupeKey } from '../src/jobber/webhook.ts';
 import { composeSms, departmentFor, isStopRequest, smsSegments } from '../src/sms/compose.ts';
@@ -217,13 +217,15 @@ describe('caller text helpers (create_request)', () => {
   });
 
   it('writes a note and owner alert with everything the caller said', () => {
-    const note = requestNote({ callerName: 'Sam Smith', callbackPhone: '021 467 770', address: '12 Smith St', description: 'Leaking tap', urgency: 'soon', addressOnFile: false });
+    const note = requestNote({ callerName: 'Sam Smith', callbackPhone: '021 467 770', phoneSource: 'caller_id', address: '12 Smith St', description: 'Leaking tap', urgency: 'soon', addressOnFile: false });
     assert.match(note, /Caller: Sam Smith/);
     assert.match(note, /not yet a property/);
     assert.match(note, /Leaking tap$/);
-    const alert = ownerAlertText({ callerName: 'Sam', callbackPhone: '021 467 770', address: null, description: 'Leak', urgency: 'emergency', loggedInJobber: false });
+    const alert = ownerAlertText({ callerName: 'Sam', callbackPhone: '021 467 770', phoneSource: 'spoken_no_caller_id', address: null, description: 'Leak', urgency: 'emergency', loggedInJobber: false });
     assert.match(alert, /^URGENT new request from Sam \(021 467 770\)/);
     assert.match(alert, /NOT saved in Jobber/);
+    assert.match(alert, /caller ID hidden: not verified/);
+    assert.match(note, /Callback: 021 467 770 \(from caller ID\)/);
   });
 });
 
@@ -276,5 +278,18 @@ describe('confirmName', () => {
     assert.equal(confirmName(base), 'Tom Jones');
     assert.equal(confirmName({ ...base, name: 'Apex Building', companyName: 'Apex Building', isCompany: true }), 'Tom Jones from Apex Building');
     assert.equal(confirmName({ ...base, firstName: '', lastName: '', name: 'Apex Building', companyName: 'Apex Building', isCompany: true }), 'Apex Building');
+  });
+});
+
+describe('looksMadeUp (invented phone numbers)', () => {
+  it('flags placeholder-looking numbers', () => {
+    assert.equal(looksMadeUp('022 123 4567'), true);
+    assert.equal(looksMadeUp('021 000 0000'), true);
+    assert.equal(looksMadeUp('027 987 6543'), true);
+  });
+  it('accepts real-looking numbers', () => {
+    assert.equal(looksMadeUp('021 467 770'), false);
+    assert.equal(looksMadeUp('09 873 6617'), false);
+    assert.equal(looksMadeUp('022 418 3390'), false);
   });
 });
