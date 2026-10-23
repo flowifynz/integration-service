@@ -20,7 +20,8 @@ envVarGroups:
         value: "2025-04-16"
       # Added in the dashboard (secrets): PUBLIC_BASE_URL, APP_SECRET, TOKEN_ENCRYPTION_KEY,
       # JOBBER_CLIENT_ID, JOBBER_CLIENT_SECRET, ELEVENLABS_TOOL_SECRET,
-      # ELEVENLABS_WEBHOOK_SECRET, TNZ_API_TOKEN, TNZ_INBOUND_KEY, SENTRY_DSN
+      # ELEVENLABS_WEBHOOK_SECRET, TNZ_API_TOKEN, TNZ_INBOUND_KEY, SENTRY_DSN,
+      # GOOGLE_CHAT_WEBHOOK_URL (support alerts space), optional ALERT_MOBILE; see docs/alerts.md
 
 services:
   # 1. Web service: ElevenLabs tool calls, Jobber webhooks, Jobber OAuth connect flow.

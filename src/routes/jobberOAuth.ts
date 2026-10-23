@@ -14,7 +14,8 @@ import type { FastifyInstance, FastifyReply } from 'fastify';
 import { config } from '../config.ts';
 import { signToken, verifyToken } from '../crypto.ts';
 import { getClientById } from '../db.ts';
-import { saveConnection } from '../jobber/connection.ts';
+import { raiseAlert } from '../alerts/alerts.ts';
+import { connectionStatus, saveConnection } from '../jobber/connection.ts';
 import { ACCOUNT_QUERY, jobberQueryWithToken } from '../jobber/graphql.ts';
 import { authorizeUrl, exchangeCode } from '../jobber/oauth.ts';
 
@@ -60,15 +61,25 @@ export async function jobberOAuthRoutes(app: FastifyInstance) {
     if (!client) return page(reply, 404, 'Unknown business', 'We could not find your business. Please contact Flowify.');
 
     try {
+      const previous = await connectionStatus(client.id);
       const tokens = await exchangeCode(code);
       const { account } = await jobberQueryWithToken<{ account: { id: string; name: string } }>(tokens.accessToken, ACCOUNT_QUERY);
       await saveConnection(client.id, tokens, account);
       req.log.info({ clientId: client.id, jobberAccountId: account.id }, 'Jobber connected');
+      if (previous === 'needs_reconnect' || previous === 'disconnected') {
+        await raiseAlert({ kind: 'jobber_reconnected', clientId: client.id, dedupeKey: `jobber_reconnected:${client.id}:${Date.now()}` });
+      }
       return page(reply, 200, 'Jobber connected', `${client.business_name} is now connected to Flowify. You can close this tab.`);
     } catch (err) {
       // Most likely: the Jobber account is already connected to a different Flowify client
       // (unique index), or Jobber rejected the code.
       req.log.error({ err, clientId: client.id }, 'Jobber connect failed');
+      const isDuplicate = /jobber_connections_live_account|duplicate key/i.test((err as Error).message ?? '');
+      await raiseAlert({
+        kind: 'jobber_connect_failed',
+        clientId: client.id,
+        detail: isDuplicate ? 'that Jobber account is already connected to another client' : 'see logs',
+      });
       return page(reply, 500, 'Something went wrong', 'We could not finish connecting Jobber. Flowify has been notified.');
     }
   });

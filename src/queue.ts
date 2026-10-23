@@ -13,6 +13,10 @@ export const Queues = {
   FOLLOW_UP_CHECK: 'follow-up-check',
   /** Nightly: text every client's customers about tomorrow's visits. */
   DAY_BEFORE_REMINDERS: 'day-before-reminders',
+  /** Text one admin_alerts row to Jaron (see alerts/alerts.ts). */
+  SEND_ADMIN_ALERT: 'send-admin-alert',
+  /** Hourly: repeat unresolved alerts, find stuck events and backed-up queues. */
+  HEALTH_CHECK: 'health-check',
 } as const;
 
 export type QueueName = (typeof Queues)[keyof typeof Queues];

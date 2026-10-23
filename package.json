@@ -23,6 +23,7 @@
     "sms:test": "node src/scripts/sendTestSms.ts",
     "sms:usage": "node src/scripts/smsUsage.ts",
     "jobber:tomorrow": "node src/scripts/tomorrowVisits.ts",
+    "alerts:check": "node src/scripts/healthCheck.ts",
     "test": "node --test test/*.test.ts"
   },
   "dependencies": {

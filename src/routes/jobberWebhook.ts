@@ -5,6 +5,7 @@
 // happen in the worker. Target: well under 100 ms.
 
 import type { FastifyInstance } from 'fastify';
+import { raiseAlert } from '../alerts/alerts.ts';
 import { config } from '../config.ts';
 import { db } from '../db.ts';
 import { clientIdForAccount, markDisconnectedByAccount } from '../jobber/connection.ts';
@@ -51,7 +52,9 @@ export async function jobberWebhookRoutes(app: FastifyInstance) {
       const disconnected = await markDisconnectedByAccount(evt.accountId);
       req.log.warn({ jobberAccountId: evt.accountId, clientId: disconnected }, 'Jobber app disconnected');
       await db().query(`UPDATE webhook_events SET status = 'processed', processed_at = now() WHERE id = $1`, [eventId]);
-      // TODO(step 7): alert Jaron — a disconnect usually means a cancellation or a mistake.
+      // A disconnect usually means a cancellation or a mistake — either way Jaron needs to know.
+      // raiseAlert only inserts a row and queues a job, so it stays well inside Jobber's 1 s.
+      if (disconnected) await raiseAlert({ kind: 'jobber_disconnected', clientId: disconnected });
     } else if (clientId) {
       // If this send fails the event stays 'received'; the weekly check / a sweeper picks it up.
       await (await getBoss()).send(Queues.JOBBER_EVENT, { eventId });

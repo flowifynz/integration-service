@@ -46,7 +46,8 @@ The full backlog (D1–D12) lives in Notion: Flowify Builds › Flowify Service 
 | Worker: Jobber-driven texts (confirmations, reminders, quote/invoice follow-ups, reviews) | Done (step 4), see docs/jobber-texts.md |
 | TNZ cost tracking + monthly usage report (`sms:usage`) | Done |
 | Base mode, missed-call text-back | Not built (D1, D2) |
-| Go-live readiness: alerts to Jaron, onboarding script, minutes cap, weekly calls-vs-Jobber check | Not built (D4, D5, D6, D7) |
+| Alerts to Jaron (Google Chat, optional text) + hourly health check | Done (D4), see docs/alerts.md |
+| Go-live readiness: onboarding script, minutes cap, weekly calls-vs-Jobber check | Not built (D5, D6, D7) |
 
 ## Layout
 

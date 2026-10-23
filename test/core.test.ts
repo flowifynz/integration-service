@@ -392,3 +392,87 @@ describe('customer mobile + wording', () => {
     assert.match(texts[0]!, /^Hi Sam, you're booked in with Smith Plumbing for Fri 30 Oct, 8am-10:30am at 12 Smith Street\.$/);
   });
 });
+
+import { alertText, alertTnzMessageId, dailyAlertKey, isAlertDaytime, nzDate, toGsmSafe, type AlertKind } from '../src/alerts/text.ts';
+
+describe('admin alerts (D4)', () => {
+  const kinds: AlertKind[] = [
+    'jobber_needs_reconnect', 'jobber_disconnected', 'jobber_reconnected', 'jobber_connect_failed',
+    'sms_failures', 'stuck_webhooks', 'queue_backlog', 'test',
+  ];
+
+  it('every alert is plain GSM-7, has no link, and fits in 2 segments', () => {
+    for (const kind of kinds) {
+      const text = alertText(kind, { businessName: 'Tāmaki Plumbing – “Ltd”', slug: 'tamaki-plumbing', detail: 4 });
+      const { encoding, segments } = smsSegments(text);
+      assert.equal(encoding, 'GSM-7', `${kind}: ${text}`);
+      assert.ok(segments <= 2, `${kind} is ${segments} segments`);
+      assert.doesNotMatch(text, /https?:|www\./i, `${kind} contains a link (TNZ URL check)`);
+    }
+  });
+
+  it('reconnect alerts name the client and the connect-link command', () => {
+    const text = alertText('jobber_needs_reconnect', { businessName: 'Smith Plumbing', slug: 'smith-plumbing' });
+    assert.match(text, /Smith Plumbing/);
+    assert.match(text, /connectLink\.js smith-plumbing/);
+  });
+
+  it('strips macrons, curly quotes and dashes', () => {
+    assert.equal(toGsmSafe('Tāmaki – “Ōrākei”'), 'Tamaki - "Orakei"');
+  });
+
+  it('daily keys roll over at NZ midnight, not UTC midnight', () => {
+    // 2026-10-23 10:30 UTC = 23:30 NZDT on the 23rd; 11:30 UTC = 00:30 on the 24th.
+    assert.equal(nzDate(new Date('2026-10-23T10:30:00Z')), '2026-10-23');
+    assert.equal(nzDate(new Date('2026-10-23T11:30:00Z')), '2026-10-24');
+    assert.equal(dailyAlertKey('sms_failures', 'abc', new Date('2026-10-23T11:30:00Z')), 'sms_failures:abc:2026-10-24');
+    assert.equal(dailyAlertKey('queue_backlog', null, new Date('2026-10-23T11:30:00Z')), 'queue_backlog:all:2026-10-24');
+  });
+
+  it('health-check alerts only go out 7am to 9pm NZ', () => {
+    assert.equal(isAlertDaytime(new Date('2026-10-23T17:59:00Z')), false); // 6:59am NZDT
+    assert.equal(isAlertDaytime(new Date('2026-10-23T18:00:00Z')), true); // 7:00am
+    assert.equal(isAlertDaytime(new Date('2026-10-23T07:59:00Z')), true); // 8:59pm
+    assert.equal(isAlertDaytime(new Date('2026-10-23T08:00:00Z')), false); // 9:00pm
+  });
+
+  it('alert MessageIDs never look like a customer text row', () => {
+    const id = alertTnzMessageId(12, 1);
+    assert.equal(id, 'flowifyalert12a1');
+    assert.match(id, /^[A-Za-z0-9]{1,40}$/);
+    assert.equal(messageRowIdFromTnz(id), null);
+  });
+});
+
+import { alertChatText, alertThreadKey } from '../src/alerts/text.ts';
+import { googleChatPostUrl } from '../src/alerts/googleChat.ts';
+
+describe('admin alerts in Google Chat', () => {
+  it('reconnect alerts carry the connect link when given one', () => {
+    const text = alertChatText('jobber_needs_reconnect', {
+      businessName: 'Smith Plumbing',
+      slug: 'smith-plumbing',
+      connectLink: 'https://example.onrender.com/jobber/connect?t=abc',
+    });
+    assert.match(text, /\*Smith Plumbing: Jobber connection expired\*/);
+    assert.match(text, /<https:\/\/example\.onrender\.com\/jobber\/connect\?t=abc\|Connect Jobber to Flowify>/);
+  });
+
+  it('falls back to the Render Shell command without a link', () => {
+    assert.match(alertChatText('jobber_disconnected', { slug: 'smith-plumbing' }), /connectLink\.js smith-plumbing/);
+  });
+
+  it('keeps every Jobber alert for a client in one thread', () => {
+    assert.equal(alertThreadKey('jobber_needs_reconnect', 'c1'), alertThreadKey('jobber_reconnected', 'c1'));
+    assert.notEqual(alertThreadKey('jobber_disconnected', 'c1'), alertThreadKey('jobber_disconnected', 'c2'));
+    assert.equal(alertThreadKey('queue_backlog', null), 'queue_backlog-all');
+  });
+
+  it('adds thread options to the webhook URL without losing key and token', () => {
+    const url = new URL(googleChatPostUrl('https://chat.googleapis.com/v1/spaces/AAA/messages?key=K&token=T', 'jobber-c1'));
+    assert.equal(url.searchParams.get('key'), 'K');
+    assert.equal(url.searchParams.get('token'), 'T');
+    assert.equal(url.searchParams.get('threadKey'), 'jobber-c1');
+    assert.equal(url.searchParams.get('messageReplyOption'), 'REPLY_MESSAGE_FALLBACK_TO_NEW_THREAD');
+  });
+});

@@ -6,6 +6,7 @@
 // client is locked out. So refresh happens inside a transaction holding a row lock
 // (SELECT ... FOR UPDATE): the second request waits, then sees the fresh token and uses it.
 
+import { raiseAlert } from '../alerts/alerts.ts';
 import { config } from '../config.ts';
 import { decrypt, encrypt } from '../crypto.ts';
 import { db, withTransaction } from '../db.ts';
@@ -109,8 +110,8 @@ export async function getAccessToken(clientId: string, opts: { force?: boolean }
   });
 
   if (token === null) {
-    // TODO(build step 7): alert Jaron (Sentry + owner email) — this client needs a new connect link.
     console.error(`Jobber refresh token rejected for client ${clientId}; marked needs_reconnect`);
+    await raiseAlert({ kind: 'jobber_needs_reconnect', clientId }); // never throws
     throw new JobberNotConnectedError(clientId, 'needs_reconnect');
   }
   return token;
@@ -128,6 +129,14 @@ export async function markDisconnectedByAccount(jobberAccountId: string): Promis
     [jobberAccountId],
   );
   return rows[0]?.client_id ?? null;
+}
+
+/** Current connection status for a client, or null if never connected. */
+export async function connectionStatus(clientId: string): Promise<ConnectionRow['status'] | null> {
+  const { rows } = await db().query<{ status: ConnectionRow['status'] }>('SELECT status FROM jobber_connections WHERE client_id = $1', [
+    clientId,
+  ]);
+  return rows[0]?.status ?? null;
 }
 
 export async function clientIdForAccount(jobberAccountId: string): Promise<string | null> {

@@ -60,6 +60,24 @@ export const config = {
       return required('TNZ_INBOUND_KEY');
     },
   },
+  alerts: {
+    /** Incoming webhook URL of the Google Chat space alerts are posted to (Jaron's support alerts space). */
+    get googleChatWebhookUrl(): string | undefined {
+      const url = process.env.GOOGLE_CHAT_WEBHOOK_URL || undefined;
+      if (url && !url.startsWith('https://chat.googleapis.com/')) {
+        throw new Error('GOOGLE_CHAT_WEBHOOK_URL must start with https://chat.googleapis.com/');
+      }
+      return url;
+    },
+    /** Optional: also text alerts to this mobile (E.164 or NZ format). Unset = no alert texts. */
+    get mobile(): string | undefined {
+      return process.env.ALERT_MOBILE || undefined;
+    },
+    /** 'Live' by default: alerts are real even while a client's texts are in Test mode. */
+    get smsMode(): 'Live' | 'Test' {
+      return process.env.ALERT_SMS_MODE?.toLowerCase() === 'test' ? 'Test' : 'Live';
+    },
+  },
   get sentryDsn(): string | undefined {
     return process.env.SENTRY_DSN || undefined;
   },

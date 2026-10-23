@@ -2,6 +2,8 @@
 // Processes queued jobs: texts, Jobber webhook events, follow-up checks, nightly reminders.
 
 import { Sentry } from './instrument.ts';
+import { sendAdminAlert } from './alerts/alerts.ts';
+import { runHealthCheck } from './alerts/healthCheck.ts';
 import { type FollowUpCheck, handleJobberEvent, runCheck, runDayBeforeReminders } from './automation/run.ts';
 import { closeDb, db } from './db.ts';
 import { getBoss, Queues, stopBoss } from './queue.ts';
@@ -17,7 +19,11 @@ await boss.work<SendSmsJob>(Queues.SEND_SMS, async ([job]) => {
     // Quiet hours: re-queue for 8am. Same idempotency key, so it still sends at most once.
     await boss.send(Queues.SEND_SMS, job.data, { startAfter: result.until });
   } else if (result.status === 'failed_permanent') {
-    Sentry.captureMessage(`SMS permanently failed: ${result.error}`, 'warning');
+    Sentry.withScope((scope) => {
+      scope.setTag('client_id', job.data.clientId);
+      scope.setTag('sms_kind', job.data.kind);
+      Sentry.captureMessage(`SMS permanently failed: ${result.error}`, 'warning');
+    });
   }
 });
 
@@ -54,6 +60,21 @@ await boss.work<{ date: string }>(Queues.DAY_BEFORE_REMINDERS, async ([job]) => 
   if (!job) return;
   await runDayBeforeReminders(job.data.date);
 });
+
+// ---- send-admin-alert ---------------------------------------------------------------
+// Alert texts to Jaron. Not subject to quiet hours.
+await boss.work<{ alertId: string }>(Queues.SEND_ADMIN_ALERT, async ([job]) => {
+  if (!job) return;
+  const result = await sendAdminAlert(job.data.alertId);
+  console.log(`[alert ${job.data.alertId}] ${result}`);
+});
+
+// ---- health-check (hourly) ----------------------------------------------------------
+await boss.work(Queues.HEALTH_CHECK, async () => {
+  for (const line of await runHealthCheck()) console.log(`[health] ${line}`);
+});
+// pg-boss keeps the schedule in Postgres; calling this on every start just updates it.
+await boss.schedule(Queues.HEALTH_CHECK, '7 * * * *', {}, { tz: 'Pacific/Auckland' });
 
 console.log('Worker started');
 
