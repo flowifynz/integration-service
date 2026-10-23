@@ -26,7 +26,7 @@ import { safeEqual } from '../crypto.ts';
 import { type ClientRow, db } from '../db.ts';
 import { verifyElevenLabsSignature } from '../elevenlabsSignature.ts';
 import { Sentry } from '../instrument.ts';
-import { addressMatches, normaliseUrgency, ownerAlertText, requestNote, requestTitle, splitName } from '../jobber/callerText.ts';
+import { addressMatches, confirmName, normaliseUrgency, ownerAlertText, requestNote, requestTitle, splitName } from '../jobber/callerText.ts';
 import { createJobberClient, createJobberRequest, findClientsByPhone, findPropertyId, pickClient } from '../jobber/clients.ts';
 import { formatNational, toE164 } from '../phone.ts';
 import { getBoss, Queues } from '../queue.ts';
@@ -132,10 +132,9 @@ export async function elevenLabsToolRoutes(app: FastifyInstance) {
                 ok: true,
                 found: true,
                 first_name: match.firstName,
-                full_name: match.name,
-                // Confirm, don't ask: "Am I speaking with Tom Jones?" is quicker for the caller,
-                // and only reveals the name to someone holding that customer's phone.
-                message: `Existing customer on file as ${match.name}. Confirm by asking "Am I speaking with ${match.name}?" instead of asking for their name. If they say no, take their full name as normal. Never read out an address or job details; always ask for the site address.`,
+                customer_name: confirmName(match),
+                // Confirm, don't ask. Only reveals the name to someone holding that customer's phone.
+                message: `Existing customer on file as ${confirmName(match)}. Confirm by asking "Am I speaking with ${confirmName(match)}?" instead of asking for their name. If they say no, take their full name as normal. Never read out an address or job details; always ask for the site address.`,
               }
             : { ok: true, found: false, message: 'New caller. Take their full name, site address and what they need.' },
         );
@@ -273,11 +272,15 @@ export async function elevenLabsToolRoutes(app: FastifyInstance) {
     const body = (req.body ?? {}) as { caller_id?: string; called_number?: string; agent_id?: string };
     const client = await resolveClient(body);
     let firstName = '';
+    let customerName = 'none';
     const caller = toE164(str(body.caller_id));
     if (client && caller) {
       try {
         const matches = await findClientsByPhone(client.id, caller, { timeoutMs: 1_500 });
-        if (matches.length === 1) firstName = matches[0]!.firstName;
+        if (matches.length === 1) {
+          firstName = matches[0]!.firstName;
+          customerName = confirmName(matches[0]!);
+        }
       } catch (err) {
         req.log.warn({ err: (err as Error).message }, 'call-start lookup skipped');
       }
@@ -289,6 +292,9 @@ export async function elevenLabsToolRoutes(app: FastifyInstance) {
         customer_first_name: firstName,
         // Ready-made opener for the first message, so new callers don't get "Kia ora ,".
         greeting: firstName ? `Kia ora ${firstName}` : 'Kia ora',
+        // So the agent doesn't ask for a number it already has, or look the caller up twice.
+        caller_id_available: caller ? 'yes' : 'no',
+        customer_name: customerName, // 'none' if not found or no caller ID
         tier: client?.tier ?? '',
         can_book: client ? canBook(client) : false,
         can_reschedule: client ? canReschedule(client) : false,

@@ -86,3 +86,15 @@ export function ownerAlertText(n: {
     .filter(Boolean)
     .join('\n');
 }
+
+/**
+ * How the agent should refer to a Jobber client when confirming who's calling:
+ * "Tom Jones", or "Tom Jones from Apex Building" for a company client with a contact name,
+ * or just "Apex Building" if there's no person's name.
+ */
+export function confirmName(c: { firstName: string; lastName: string; name: string; companyName: string | null; isCompany: boolean }): string {
+  const person = [c.firstName, c.lastName].map((s) => (s ?? '').trim()).filter(Boolean).join(' ');
+  const company = (c.companyName ?? '').trim();
+  if (c.isCompany && company) return person ? `${person} from ${company}` : company;
+  return person || c.name;
+}

@@ -17,7 +17,10 @@ export interface JobberClientMatch {
   id: string;
   firstName: string;
   lastName: string;
+  /** Jobber's display name: the company name for company clients. */
   name: string;
+  companyName: string | null;
+  isCompany: boolean;
 }
 
 interface UserError {
@@ -36,7 +39,7 @@ export class JobberUserError extends Error {
 const FIND_BY_PHONE = /* GraphQL */ `
   query FlowifyFindByPhone($term: String!) {
     clients(first: 10, searchTerm: $term, searchFields: [PHONES], filter: { isArchived: false }) {
-      nodes { id firstName lastName name phones { number } }
+      nodes { id firstName lastName name companyName isCompany phones { number } }
     }
   }
 `;
@@ -64,7 +67,7 @@ export async function findClientsByPhone(
   for (const { value } of ok) {
     for (const c of value.clients.nodes) {
       if (c.phones.some((p) => toE164(p.number) === e164)) {
-        byId.set(c.id, { id: c.id, firstName: c.firstName, lastName: c.lastName, name: c.name });
+        byId.set(c.id, { id: c.id, firstName: c.firstName, lastName: c.lastName, name: c.name, companyName: c.companyName, isCompany: c.isCompany });
       }
     }
   }
@@ -82,7 +85,7 @@ export function pickClient(matches: JobberClientMatch[], spokenName?: string | n
 const CLIENT_CREATE = /* GraphQL */ `
   mutation FlowifyClientCreate($input: ClientCreateInput!) {
     clientCreate(input: $input) {
-      client { id firstName lastName name clientProperties(first: 1) { nodes { id } } }
+      client { id firstName lastName name companyName isCompany clientProperties(first: 1) { nodes { id } } }
       userErrors { message path }
     }
   }

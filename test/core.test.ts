@@ -5,7 +5,7 @@ import { createHmac, randomBytes } from 'node:crypto';
 import { describe, it } from 'node:test';
 import { decrypt, encrypt, safeEqual, signToken, verifyToken } from '../src/crypto.ts';
 import { verifyElevenLabsSignature } from '../src/elevenlabsSignature.ts';
-import { addressMatches, normaliseUrgency, ownerAlertText, requestNote, requestTitle, splitName } from '../src/jobber/callerText.ts';
+import { addressMatches, confirmName, normaliseUrgency, ownerAlertText, requestNote, requestTitle, splitName } from '../src/jobber/callerText.ts';
 import { accessTokenExpiry } from '../src/jobber/oauth.ts';
 import { parseJobberWebhook, verifyJobberSignature, webhookDedupeKey } from '../src/jobber/webhook.ts';
 import { composeSms, departmentFor, isStopRequest, smsSegments } from '../src/sms/compose.ts';
@@ -267,5 +267,14 @@ describe('SMS cost tracking (pricing option A)', () => {
     assert.equal(reportMonth(undefined, new Date('2026-10-31T12:00:00Z')), '2026-10'); // already 1 Nov in NZ
     assert.equal(reportMonth('2026-07'), '2026-07');
     assert.throws(() => reportMonth('July'));
+  });
+});
+
+describe('confirmName', () => {
+  const base = { firstName: 'Tom', lastName: 'Jones', name: 'Tom Jones', companyName: null, isCompany: false };
+  it('uses the person, adding the company for company clients', () => {
+    assert.equal(confirmName(base), 'Tom Jones');
+    assert.equal(confirmName({ ...base, name: 'Apex Building', companyName: 'Apex Building', isCompany: true }), 'Tom Jones from Apex Building');
+    assert.equal(confirmName({ ...base, firstName: '', lastName: '', name: 'Apex Building', companyName: 'Apex Building', isCompany: true }), 'Apex Building');
   });
 });

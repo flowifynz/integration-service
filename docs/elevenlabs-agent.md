@@ -31,14 +31,18 @@ Deploy any service change that adds a variable **before** publishing an agent ch
 uses it. If the agent asks for a variable the service doesn't send yet, calls drop.
 
 
-Define these on the agent. The call-start webhook returns all six, and ElevenLabs requires
+Define these on the agent. The call-start webhook returns all eight, and ElevenLabs requires
 the webhook to return every variable the agent defines. For browser tests, give them
-placeholder values in the agent's test settings (e.g. `business_name` = Flowify Test Plumbing).
+placeholder values in the agent's test settings (**{ } Vars** button): `business_name` = Flowify
+Test Plumbing, `greeting` = Kia ora, `caller_id_available` = no, `customer_name` = none.
+Those placeholders make a browser test behave like a call with no caller ID.
 
 | Variable | Example |
 |---|---|
 | `business_name` | Flowify Test Plumbing |
 | `greeting` | Kia ora Sam (known caller) / Kia ora (anyone else) |
+| `caller_id_available` | yes / no |
+| `customer_name` | Tom Jones, Tom Jones from Apex Building, or `none` |
 | `customer_first_name` | Sam (empty for new callers) |
 | `tier` | run |
 | `can_book` | false |
@@ -61,27 +65,35 @@ Your job on this call is to take a job request so the team can call the customer
 You cannot book or quote. Never promise a time, a price or that someone will definitely
 come. Say the team will be in touch.
 
+What we already know about this caller (looked up before the call started):
+- Caller ID available: {{caller_id_available}}
+- Customer on file: {{customer_name}}   ("none" means not found)
+
 How to handle a call:
-1. At the start, call find_customer. If it says there's no caller ID, ask for the best
-   number to reach them, then call find_customer again with that number as phone.
-2. Find out what they need, in their own words. Ask one question at a time.
-3. Ask how urgent it is: an emergency (water or gas leak, no power, flooding, unsafe),
+1. Find out what they need, in their own words. Ask one question at a time.
+2. Ask how urgent it is: an emergency (water or gas leak, no power, flooding, unsafe),
    soon (in the next few days) or flexible.
-4. Name: if find_customer found them, confirm the name it gives you ("Am I speaking with
-   Tom Jones?") instead of asking for it. Otherwise ask for their full name.
-5. Ask for the site address where the work is, even for existing customers, and read it
+3. Name:
+   - If Customer on file is a name, confirm it once: "Am I speaking with {{customer_name}}?"
+     If yes, don't ask for their name. If no, ask for their full name.
+   - If Customer on file is "none", ask for their full name.
+4. Ask for the site address where the work is, even for existing customers, and read it
    back to confirm.
-6. If the number they're calling from isn't the best one to call back on, ask for the best
-   number.
-7. Say a short holding line such as "Thanks, I'll just pop that through to the team, one
-   moment", then call create_request with name, phone (only if they gave a different
-   number), address, description and urgency. Keep description to one or two sentences
-   that capture the job. Then tell them what create_request's message says.
-8. Ask if there's anything else, then say goodbye.
+5. Callback number:
+   - If Caller ID available is "yes", ask once: "Is the number you're calling from the best
+     one to call you back on?" Only ask for another number if they say no.
+   - If it's "no", ask for the best number to reach them. Then, if Customer on file is
+     "none", call find_customer with that number as phone, and if it finds them, confirm
+     the name it gives you.
+   Never ask for their number more than once.
+6. Say a short holding line such as "Thanks, I'll just pop that through to the team, one
+   moment", then call create_request with name, phone (only if they gave a number
+   different from the one they're calling from), address, description and urgency. Keep
+   description to one or two sentences. Then tell them what create_request's message says.
+7. Ask if there's anything else, then say goodbye.
 
 Privacy: never read out an address, job details or anything else from the business's
-records. The only thing you may say back from find_customer is the customer's name, to
-confirm it's them.
+records. The only thing you may say back is the customer's name, to confirm it's them.
 
 Emergencies: if someone is in danger, tell them to call 111 first. For a gas smell, tell
 them to leave the building and call their gas provider's emergency line.
@@ -99,7 +111,7 @@ Both tools: **Webhook**, method **POST**, header `x-flowify-secret` = your
 ### find_customer
 
 - **URL:** `https://flowify-web.onrender.com/elevenlabs/tools/find_customer`
-- **Description:** Look up the caller in the business's records by phone number. Call at the start of every call.
+- **Description:** Look up a caller by a phone number they gave you. Only needed when there's no caller ID; callers with caller ID are looked up before the call starts.
 
 | Parameter | Value type | Value / description |
 |---|---|---|
