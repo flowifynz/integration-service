@@ -63,9 +63,9 @@ the agent, Make, Notion or chat. Add to `flowify-shared`:
 | `INTERNAL_TNZ_SUBACCOUNT` | optional, default `Flowify Internal` (same as the old Make texts) | no |
 | `GHL_API_VERSION` | optional, default `v3` (what GHL's docs list) | no |
 
-The location and calendar IDs in the old Make scenarios were `cSD3rittRRDCXU27Jpzn` and
-`oC1SnO8LGLHlY6NfZRjs`. Check they're still right in GHL (calendar settings → the ID is in
-the calendar's link).
+Current values (24 Oct 2026): location `cSD3rittRRDCXU27Jpzn`, discovery-call calendar
+`IDjKjurwWTDah0acKkr0` (the old Make scenarios used an earlier calendar, `oC1SnO8LGLHlY6NfZRjs`).
+If the calendar changes again, its ID is in the calendar's link in GHL.
 
 ## 2. GHL: new token, calendar check
 
