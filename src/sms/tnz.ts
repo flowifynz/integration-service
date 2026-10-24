@@ -57,6 +57,20 @@ export function messageRowIdFromTnz(messageId: string | null | undefined): strin
   return messageId?.match(/^flowify(\d+)a\d+$/)?.[1] ?? null;
 }
 
+/**
+ * MessageID for one of Flowify's OWN texts (src/internal/, row in internal.messages):
+ * 'flowifyint<row id>a<attempt>'. Never matches messageRowIdFromTnz (letters follow
+ * 'flowify'), so a result or reply can't be mistaken for a client's text.
+ */
+export function internalTnzMessageId(rowId: string | number, attempt: number): string {
+  return `flowifyint${rowId}a${attempt}`;
+}
+
+/** Reverse of internalTnzMessageId: the internal.messages row id, or null. */
+export function internalRowIdFromTnz(messageId: string | null | undefined): string | null {
+  return messageId?.match(/^flowifyint(\d+)a\d+$/)?.[1] ?? null;
+}
+
 export function inboundWebhookUrl(): string {
   return `${config.publicBaseUrl}/tnz/inbound?key=${encodeURIComponent(config.tnz.inboundKey)}`;
 }

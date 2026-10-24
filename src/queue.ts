@@ -19,6 +19,10 @@ export const Queues = {
   POST_CALL: 'post-call',
   /** Hourly: repeat unresolved alerts, find stuck events and backed-up queues. */
   HEALTH_CHECK: 'health-check',
+  /** Flowify's own texts (src/internal/sms.ts). Never a client text. */
+  INTERNAL_SMS: 'internal-send-sms',
+  /** Flowify's own Google Chat posts, e.g. a new website booking (src/internal/chat.ts). */
+  INTERNAL_CHAT: 'internal-chat',
 } as const;
 
 export type QueueName = (typeof Queues)[keyof typeof Queues];

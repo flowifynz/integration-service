@@ -8,6 +8,9 @@
 // Attribution: TNZ puts our outbound MessageID on results and matched replies, which gives
 // us the messages row and so the client. Fallback for replies: the SubAccount. If neither
 // works, a STOP opts the number out of every client (safe default for a shared short code).
+//
+// Flowify's own texts (src/internal/) carry 'flowifyint…' MessageIDs and their own TNZ
+// SubAccount: their results go to internal.messages and a STOP to internal.opt_outs only.
 
 import type { FastifyInstance } from 'fastify';
 import { config } from '../config.ts';
@@ -16,7 +19,7 @@ import { db } from '../db.ts';
 import { isMobile, toE164 } from '../phone.ts';
 import { isStopRequest } from '../sms/compose.ts';
 import { extractInbound, isBlacklisted, isReply, isSendResult } from '../sms/inbound.ts';
-import { messageRowIdFromTnz } from '../sms/tnz.ts';
+import { internalRowIdFromTnz, messageRowIdFromTnz } from '../sms/tnz.ts';
 
 export async function tnzInboundRoutes(app: FastifyInstance) {
   app.post('/tnz/inbound', async (req, reply) => {
@@ -26,6 +29,24 @@ export async function tnzInboundRoutes(app: FastifyInstance) {
     const body = (req.body && typeof req.body === 'object' ? req.body : {}) as Record<string, unknown>;
     const f = extractInbound(body);
     const rowId = messageRowIdFromTnz(f.messageId);
+    // Flowify's own texts (src/internal/) have their own MessageID prefix and tables.
+    const internalRowId = internalRowIdFromTnz(f.messageId);
+
+    // ---- Result of one of Flowify's own texts -----------------------------------------
+    if (isSendResult(f) && internalRowId) {
+      const { rows } = await db().query<{ to_phone: string }>(
+        `UPDATE internal.messages
+            SET price = $2, sms_parts = $3, delivery_status = $4, delivery_result = $5, result_at = now()
+          WHERE id = $1
+          RETURNING to_phone`,
+        [internalRowId, f.price, f.smsParts, f.status ?? null, f.result ?? f.detail ?? null],
+      );
+      if (rows[0] && isBlacklisted(f)) {
+        await db().query(`INSERT INTO internal.opt_outs (phone, source) VALUES ($1, 'tnz_blacklist') ON CONFLICT DO NOTHING`, [rows[0].to_phone]);
+      }
+      req.log.info({ tnz: { type: f.type, status: f.status, internal: true } }, 'TNZ result');
+      return reply.code(200).send();
+    }
 
     // ---- Result of a text we sent: record cost + delivery ------------------------------
     if (isSendResult(f)) {
@@ -75,6 +96,13 @@ export async function tnzInboundRoutes(app: FastifyInstance) {
     );
 
     if (!phone || !isStop) return reply.code(200).send();
+
+    // A STOP to one of Flowify's own texts opts out of Flowify's texts only.
+    if (internalRowId || (f.subAccount && f.subAccount === config.internal.tnzSubaccount)) {
+      await db().query(`INSERT INTO internal.opt_outs (phone, source) VALUES ($1, 'sms_stop') ON CONFLICT DO NOTHING`, [phone]);
+      req.log.info({ internal: true }, 'SMS opt-out recorded');
+      return reply.code(200).send();
+    }
 
     let clientId: string | null = null;
     if (rowId) {

@@ -9,6 +9,7 @@ import { type FollowUpCheck, handleJobberEvent, runCheck, runDayBeforeReminders 
 import { closeDb, db } from './db.ts';
 import { getBoss, Queues, stopBoss } from './queue.ts';
 import { sendClientSms, type SendSmsJob } from './sms/outbound.ts';
+import { registerInternalWorkers } from './internal/worker.ts';
 
 const boss = await getBoss();
 
@@ -89,6 +90,9 @@ await boss.work(Queues.HEALTH_CHECK, async () => {
 });
 // pg-boss keeps the schedule in Postgres; calling this on every start just updates it.
 await boss.schedule(Queues.HEALTH_CHECK, '7 * * * *', {}, { tz: 'Pacific/Auckland' });
+
+// ---- Flowify's own automations (src/internal/) ------------------------------------
+await registerInternalWorkers(boss);
 
 console.log('Worker started');
 

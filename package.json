@@ -26,6 +26,7 @@
     "alerts:check": "node src/scripts/healthCheck.ts",
     "onboard": "node src/scripts/onboardClient.ts",
     "calls": "node src/scripts/calls.ts",
+    "internal:check": "node src/scripts/internalCheck.ts",
     "test": "node --test test/*.test.ts"
   },
   "dependencies": {

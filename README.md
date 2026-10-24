@@ -49,6 +49,12 @@ The full backlog (D1–D12) lives in Notion: Flowify Builds › Flowify Service 
 | Alerts to Jaron (Google Chat, optional text) + hourly health check | Done (D4), see docs/alerts.md |
 | Onboarding script (`onboardClient.js`), tiers renamed base/core | Done (D5, D11) |
 | Minutes cap, weekly calls-vs-Jobber check | Not built (D6, D7) |
+| **Internal module** (Flowify's own automations): website agent books discovery calls in Flowify's GHL calendar, TNZ confirmation text, Google Chat notice | Built 24 Oct 2026, see docs/internal-website-agent.md |
+
+**Client vs internal.** Everything above is for Flowify's trade clients. Flowify's own
+business automations live in `src/internal/`, with their own database schema (`internal.*`),
+their own routes (`/internal/*`), secret (`INTERNAL_TOOL_SECRET`), queues (`internal-*`), TNZ
+SubAccount and kill switch (`INTERNAL_ENABLED`). Nothing there reads or writes client rows.
 
 ## Layout
 
@@ -76,10 +82,18 @@ src/
     jobberOAuth.ts          /jobber/connect, /jobber/callback
     jobberWebhook.ts        /jobber/webhooks
     tnzInbound.ts           /tnz/inbound (STOP)
+  internal/                 Flowify's OWN automations (not client data), see docs/internal-website-agent.md
+    routes.ts               /internal/tools/check_availability, /internal/tools/book_discovery_call
+    discoveryCall.ts        bookable hours, slot picking, wording (pure, tested)
+    ghl.ts                  Flowify's GoHighLevel calendar + contacts
+    sms.ts  chat.ts         Flowify's own texts (internal.messages) and Google Chat notices
+    worker.ts               internal-send-sms, internal-chat jobs
   scripts/
     connectLink.ts          npm run connect-link -- <slug>
     jobberClients.ts        npm run jobber:clients -- <slug>   (step 1 "done" check)
+    internalCheck.ts        node dist/scripts/internalCheck.js [--chat] [--sms <mobile>]
 test/core.test.ts           unit tests for crypto, signatures, quiet hours, SMS text
+test/internal.test.ts       unit tests for the internal module
 ```
 
 Source files import each other with `.ts` extensions, so Node 22.18+ runs them directly

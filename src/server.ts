@@ -9,6 +9,7 @@ import { elevenLabsPostCallRoutes, elevenLabsToolRoutes } from './routes/elevenl
 import { jobberOAuthRoutes } from './routes/jobberOAuth.ts';
 import { jobberWebhookRoutes } from './routes/jobberWebhook.ts';
 import { tnzInboundRoutes } from './routes/tnzInbound.ts';
+import { internalToolRoutes } from './internal/routes.ts';
 
 const app = Fastify({
   logger: {
@@ -33,6 +34,8 @@ await app.register(jobberWebhookRoutes);
 await app.register(elevenLabsToolRoutes, { prefix: '/elevenlabs' });
 await app.register(elevenLabsPostCallRoutes, { prefix: '/elevenlabs' });
 await app.register(tnzInboundRoutes);
+// Flowify's own automations (website agent). Own prefix, own secret: see src/internal/.
+await app.register(internalToolRoutes, { prefix: '/internal' });
 
 // Start pg-boss before taking traffic, so the first webhook doesn't pay the startup cost.
 await getBoss();
